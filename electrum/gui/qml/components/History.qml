@@ -1,4 +1,4 @@
-import QtQuick 2.6
+import QtQuick 2.12
 import QtQuick.Layouts 1.0
 import QtQuick.Controls 2.0
 import QtQuick.Controls.Material 2.0
@@ -18,13 +18,60 @@ Pane {
         color: constants.darkerBackground
     }
 
+    Item {
+        id: drawer
+        width: parent.width
+        height: drawerLayout.height
+        y: -height
+
+        property int _ystart
+
+        ColumnLayout {
+            id: drawerLayout
+            anchors.horizontalCenter: parent.horizontalCenter
+
+            Item { width: 1; height: constants.paddingXLarge }
+            BalanceSummary {
+                id: bs
+            }
+            Item { width: 1; height: constants.paddingXLarge }
+        }
+
+        function start() {
+            _ystart = drawer.y
+        }
+
+        function setYPos(y) {
+            var newY = _ystart + y
+            drawer.y = Math.min(0, Math.max(newY, -drawer.height))
+        }
+    }
+
     ListView {
         id: listview
         width: parent.width
-        height: parent.height
-        boundsBehavior: Flickable.StopAtBounds
+        anchors.bottom: parent.bottom
+        anchors.top: drawer.bottom
+        clip: true
 
+        boundsBehavior: Flickable.StopAtBounds
         model: visualModel
+
+        DragHandler {
+            xAxis.enabled: false
+            yAxis.enabled: listview.atYBeginning
+            yAxis.minimum: 0
+            yAxis.maximum: drawer.height
+            target: null
+            onActiveChanged: {
+                console.log('dh active=' + active)
+                if (active) drawer.start()
+            }
+            onTranslationChanged: {
+                console.log('xlat changed, y=' + translation.y)
+                drawer.setYPos(translation.y)
+            }
+        }
 
         readonly property variant sectionLabels: {
             'today': qsTr('Today'),

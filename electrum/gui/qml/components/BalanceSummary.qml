@@ -5,7 +5,7 @@ import QtQuick.Controls.Material 2.0
 
 Frame {
     id: root
-    height: layout.height
+
     font.pixelSize: constants.fontSizeMedium
 
     property string formattedBalance
