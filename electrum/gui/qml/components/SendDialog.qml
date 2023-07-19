@@ -19,6 +19,11 @@ ElDialog {
     padding: 0
     topPadding: 0
 
+    onAboutToHide: {
+        console.log('about to hide')
+        qrscan.stop()
+    }
+
     function restart() {
         qrscan.restart()
     }
@@ -32,6 +37,13 @@ ElDialog {
         } else {
             invoiceParser.recipient = data
         }
+    }
+
+    // override
+    function doClose() {
+        console.log('SendDialog doClose override') // doesn't trigger when going back??
+        qrscan.stop()
+        Qt.callLater(doReject)
     }
 
     ColumnLayout {
