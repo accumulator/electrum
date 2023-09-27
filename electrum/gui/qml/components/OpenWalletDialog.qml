@@ -111,7 +111,7 @@ ElDialog {
         onNeedsPasswordChanged: {
             notice.visible = needsPassword
         }
-        onWalletOpenProblem: {
+        onWalletOpenProblem: (error) => {
             openwalletdialog.close()
             Daemon.onWalletOpenProblem(error)
         }
