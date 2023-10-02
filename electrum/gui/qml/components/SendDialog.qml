@@ -67,7 +67,10 @@ ElDialog {
                 Layout.preferredWidth: 1
                 icon.source: '../../icons/copy_bw.png'
                 text: qsTr('Paste')
-                onClicked: dialog.dispatch(AppController.clipboardToText())
+                onClicked: {
+                    qrscan.stop()
+                    dialog.dispatch(AppController.clipboardToText())
+                }
             }
         }
 
