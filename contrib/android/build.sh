@@ -44,7 +44,7 @@ fi
 info "building docker image."
 docker build \
     $DOCKER_BUILD_FLAGS \
-    -t electrum-android-builder-img-qt6 \
+    -t electrum-android-builder-img-qt6.5 \
     --file "$CONTRIB_ANDROID/Dockerfile" \
     "$PROJECT_ROOT"
 
@@ -84,7 +84,7 @@ docker run -it --rm \
     -v "$PROJECT_ROOT_OR_FRESHCLONE_ROOT"/.buildozer/.gradle:/home/user/.gradle \
     $DOCKER_RUN_FLAGS \
     --workdir /home/user/wspace/electrum \
-    electrum-android-builder-img-qt6 \
+    electrum-android-builder-img-qt6.5 \
     ./contrib/android/make_apk.sh "$@"
 
 # make sure resulting binary location is independent of fresh_clone
