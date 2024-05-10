@@ -1,9 +1,11 @@
+import itertools
 import os
 import csv
 import io
 from typing import Callable, Tuple, Any, Dict, List, Sequence, Union, Optional
 from collections import OrderedDict
 
+from . import ecc
 from .lnutil import OnionFailureCodeMetaFlag
 
 
@@ -312,6 +314,47 @@ def _parse_msgtype_intvalue_for_onion_wire(value: str) -> int:
     return msg_type_int
 
 
+def batched(iterable, n):  # itertools.batched available from python >=3.12
+    # batched('ABCDEFG', 3) → ABC DEF G
+    if n < 1:
+        raise ValueError('n must be at least one')
+    it = iter(iterable)
+    while batch := tuple(itertools.islice(it, n)):
+        yield batch
+
+
+def _tlv_merkle_root(tlvs: List[Sequence[bytes]]) -> bytes:
+    first_tlv = None
+    tlv_merkle_nodes = []
+
+    for tlv, tlvt in tlvs:
+        if first_tlv is None:
+            first_tlv = tlv
+        tlv_val = tlv
+        tlv_record_type = int.to_bytes(tlvt)  # FIXME: correct number of bytes
+        merkle_leaf_hash = ecc.bip340_tagged_hash(b'LnLeaf', tlv_val)
+        merkle_nonce = ecc.bip340_tagged_hash(b'LnNonce' + first_tlv, tlv_record_type)
+
+        # ascending order
+        msg = merkle_leaf_hash + merkle_nonce if merkle_leaf_hash < merkle_nonce else merkle_nonce + merkle_leaf_hash
+        merkle_node_hash = ecc.bip340_tagged_hash(b'LnBranch', msg)
+
+        tlv_merkle_nodes.append(merkle_node_hash)
+
+    while len(tlv_merkle_nodes) > 1:
+        target = []
+        for batch in batched(tlv_merkle_nodes, 2):
+            if len(batch) == 1:
+                target.append(batch[0])
+            else:
+                msg = batch[0] + batch[1] if batch[0] < batch[1] else batch[1] + batch[0]
+                merkle_node_hash = ecc.bip340_tagged_hash(b'LnBranch', msg)
+                target.append(merkle_node_hash)
+        tlv_merkle_nodes = target
+
+    return tlv_merkle_nodes[0]
+
+
 class LNSerializer:
 
     def __init__(self, *, for_onion_wire: bool = False):
@@ -484,12 +527,24 @@ class LNSerializer:
 
         return parsedlist[0] if len(parsedlist) == 1 else parsedlist
 
-    def write_tlv_stream(self, *, fd: io.BytesIO, tlv_stream_name: str, **kwargs) -> None:
+    def write_tlv_stream(self, *, fd: io.BytesIO, tlv_stream_name: str, signing_key: bytes = None, **kwargs) -> None:
+        sign_over_tlvs = []
+
         scheme_map = self.in_tlv_stream_get_tlv_record_scheme_from_type[tlv_stream_name]
         for tlv_record_type, scheme in scheme_map.items():  # note: tlv_record_type is monotonically increasing
             tlv_record_name = self.in_tlv_stream_get_record_name_from_type[tlv_stream_name][tlv_record_type]
             if tlv_record_name not in kwargs:
-                continue
+                # skip record_name if not in kwargs, unless we need to generate it
+                if tlv_record_name != 'signature' or signing_key is None:
+                    continue
+                else:
+                    # calculate signature over previously serialized tlv records
+                    # and store in kwargs for inclusion in tlv stream
+                    merkle_root = _tlv_merkle_root(sign_over_tlvs)
+                    priv = ecc.ECPrivkey(signing_key)
+                    tag = b'lightning' + tlv_stream_name.encode('utf-8') + b'signature'
+                    signature = priv.schnorr_sign(ecc.bip340_tagged_hash(tag, merkle_root))
+                    kwargs[tlv_record_name] = {'sig': signature}
             with io.BytesIO() as tlv_record_fd:
                 for row in scheme:
                     if row[0] == "tlvtype":
@@ -517,7 +572,16 @@ class LNSerializer:
                                          value=field_value)
                     else:
                         raise Exception(f"unexpected row in scheme: {row!r}")
-                _write_tlv_record(fd=fd, tlv_type=tlv_record_type, tlv_val=tlv_record_fd.getvalue())
+
+                tlv_val = tlv_record_fd.getvalue()
+                _write_tlv_record(fd=fd, tlv_type=tlv_record_type, tlv_val=tlv_val)
+
+                # if we need to sign the tlvs, we need the entire TLV, so serialize again
+                # and collect in `tlvs`
+                if signing_key and tlv_record_name != 'signature':
+                    with io.BytesIO() as tlvfd:
+                        _write_tlv_record(fd=tlvfd, tlv_type=tlv_record_type, tlv_val=tlv_val)
+                        sign_over_tlvs.append((tlvfd.getvalue(), tlv_record_type))
 
     def read_tlv_stream(self, *, fd: io.BytesIO, tlv_stream_name: str) -> Dict[str, Dict[str, Any]]:
         parsed = {}  # type: Dict[str, Dict[str, Any]]
