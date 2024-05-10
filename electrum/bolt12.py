@@ -27,6 +27,7 @@ import io
 import time
 
 from . import lnmsg
+from .lnmsg import LNSerializer, _tlv_merkle_root
 from .segwit_addr import bech32_decode, DecodedBech32, convertbits
 
 
@@ -49,21 +50,32 @@ def decode_offer(data):
 
 
 def decode_invoice_request(data):
+    d = bech32_decode(data, ignore_long_length=True, with_checksum=False)
+    d = bytes(convertbits(d.data, 5, 8))
     # we bomb on trailing 0, remove
-    while data[-1] == 0:
-        data = data[:-1]
-    f = io.BytesIO(data)
+    while d[-1] == 0:
+        d = d[:-1]
+    f = io.BytesIO(d)
     lns = lnmsg.LNSerializer()
     return lns.read_tlv_stream(fd=f, tlv_stream_name='invoice_request')
 
 
 def decode_invoice(data):
+    d = bech32_decode(data, ignore_long_length=True, with_checksum=False)
+    d = bytes(convertbits(d.data, 5, 8))
     # we bomb on trailing 0, remove
-    while data[-1] == 0:
-        data = data[:-1]
-    f = io.BytesIO(data)
+    while d[-1] == 0:
+        d = d[:-1]
+    f = io.BytesIO(d)
     lns = lnmsg.LNSerializer()
     return lns.read_tlv_stream(fd=f, tlv_stream_name='invoice')
+
+
+def encode_invoice_request(data, payer_key):
+    lns = LNSerializer()
+    with io.BytesIO() as fd:
+        lns.write_tlv_stream(fd=fd, tlv_stream_name='invoice_request', signing_key=payer_key, **data)
+        return fd.getvalue()
 
 
 async def request_invoice(bolt12_offer):
