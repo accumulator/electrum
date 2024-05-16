@@ -349,6 +349,8 @@ tlvtype,invoice,invoice_features,174
 tlvdata,invoice,invoice_features,features,byte,...
 tlvtype,invoice,invoice_node_id,176
 tlvdata,invoice,invoice_node_id,node_id,point,
+tlvtype,invoice,invoice_bundle,178
+tlvdata,invoice,invoice_bundle,parts,bundle_part,...
 tlvtype,invoice,signature,240
 tlvdata,invoice,signature,sig,bip340sig,
 subtype,blinded_payinfo
@@ -363,6 +365,9 @@ subtype,fallback_address
 subtypedata,fallback_address,version,byte,
 subtypedata,fallback_address,len,u16,
 subtypedata,fallback_address,address,byte,len
+subtype,bundle_part
+subtypedata,bundle_part,payment_hash,sha256,
+subtypedata,bundle_part,bundle_part_amount,tu64,
 subtype,blinded_path
 subtypedata,blinded_path,first_node_id,sciddir_or_pubkey,
 subtypedata,blinded_path,blinding,point,
