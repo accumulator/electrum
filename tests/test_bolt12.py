@@ -2,7 +2,7 @@ import io
 
 from electrum import segwit_addr, lnmsg
 from electrum import bolt12
-from electrum.bolt12 import is_offer, decode_offer, encode_invoice_request, decode_invoice_request
+from electrum.bolt12 import is_offer, decode_offer, encode_invoice_request, decode_invoice_request, encode_invoice
 from electrum.lnmsg import UnknownMandatoryTLVRecordType, _tlv_merkle_root
 from electrum.lnonion import OnionHopsDataSingle
 from electrum.segwit_addr import INVALID_BECH32
@@ -113,6 +113,13 @@ class TestBolt12(ElectrumTestCase):
         od = decode_invoice_request(invreq)
         self.assertEqual(od['offer_description']['description'], b'first test offer')
         self.assertEqual(od['offer_node_id']['node_id'], bfh('03d430b71fd7d4f0f6df575be7d9f33b0fa549c152dc03f4fc13ee2a393d4a2a5a'))
+
+    def test_encode_invoice(self):
+        data = {'offer_metadata': {'data': bfh('01020304050607')},
+                'offer_amount': {'amount': 1},
+                'offer_description': {'description': b'test_encode_invoice'}}
+        invoice_tlv = encode_invoice(data, signing_key=bfh('4141414141414141414141414141414141414141414141414141414141414141'))
+        self.assertEqual(invoice_tlv, bfh('0407010203040506070801010a13746573745f656e636f64655f696e766f696365f04013b55efc08ebd43b8971d98d2c8cb9f404e674d6f8842fad7347a7f2e2b1fe52c4a59774e7ede6e585ad6a089adb003e1ee24a9f50b27b871855c1ca0a2272c2'))
 
     def test_subtype_encode_decode(self):
         offer = 'lno1pggxv6tjwd6zqar9wd6zqmmxvejhy93pq02rpdcl6l20pakl2ad70k0n8v862jwp2twq8a8uz0hz5wfafg495'
