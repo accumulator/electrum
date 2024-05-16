@@ -78,5 +78,12 @@ def encode_invoice_request(data, payer_key):
         return fd.getvalue()
 
 
+def encode_invoice(data, signing_key):
+    lns = LNSerializer()
+    with io.BytesIO() as fd:
+        lns.write_tlv_stream(fd=fd, tlv_stream_name='invoice', signing_key=signing_key, **data)
+        return fd.getvalue()
+
+
 async def request_invoice(bolt12_offer):
     time.sleep(5)
