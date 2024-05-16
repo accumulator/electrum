@@ -175,6 +175,20 @@ class TestBolt12(ElectrumTestCase):
         invoice_tlv = encode_invoice(data, signing_key=bfh('4141414141414141414141414141414141414141414141414141414141414141'))
         self.assertEqual(invoice_tlv, bfh('0407010203040506070801010a13746573745f656e636f64655f696e766f696365f04013b55efc08ebd43b8971d98d2c8cb9f404e674d6f8842fad7347a7f2e2b1fe52c4a59774e7ede6e585ad6a089adb003e1ee24a9f50b27b871855c1ca0a2272c2'))
 
+    def test_encode_invoice_bundled_payment(self):
+        data = {'offer_metadata': {'data': bfh('01020304050607')},
+                'offer_amount': {'amount': 10},
+                'offer_description': {'description': b'test_encode_invoice_bundled_payment'},
+                'invoice_bundle': {'parts': [
+                    {'payment_hash': bfh('0000000000000000000000000000000000000000000000000000000000000000'),
+                     'bundle_part_amount': 5},
+                    {'payment_hash': bfh('0000000000000000000000000000000000000000000000000000000000000001'),
+                     'bundle_part_amount': 5}
+                ]}
+                }
+        invoice_tlv = encode_invoice(data, signing_key=bfh('4141414141414141414141414141414141414141414141414141414141414141'))
+        self.assertEqual(invoice_tlv, bfh('04070102030405060708010a0a23746573745f656e636f64655f696e766f6963655f62756e646c65645f7061796d656e74b242000000000000000000000000000000000000000000000000000000000000000005000000000000000000000000000000000000000000000000000000000000000105f0401990381ad7e799926c582107f577cc511bf468afa08926503b026a1b232d90183464897494b20bdc5f612df101816d7e19a6f9f1e444112e63ee6eb622a88e41'))
+
     def test_subtype_encode_decode(self):
         offer = 'lno1pggxv6tjwd6zqar9wd6zqmmxvejhy93pq02rpdcl6l20pakl2ad70k0n8v862jwp2twq8a8uz0hz5wfafg495'
         od = decode_offer(offer)
