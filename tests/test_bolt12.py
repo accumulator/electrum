@@ -218,8 +218,15 @@ class TestBolt12(ElectrumTestCase):
             ]}
         }
 
-        with self.assertRaises(Exception):
+        # assertRaises on generic Exception used in lnmsg encode/write_tlv_stream makes flake8 complain
+        # so work around this for now (TODO: refactor lnmsg generic exceptions)
+        #with self.assertRaises(Exception):
+        try:
             invreq_pl_tlv = encode_invoice_request(invreq, payer_key=payer_key)
+        except Exception as e:
+            pass
+        else:
+            raise Exception('Exception expected')
 
         # test complex field count matches parameters
         invreq = {
