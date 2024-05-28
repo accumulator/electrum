@@ -542,7 +542,7 @@ class LNSerializer:
                     # and store in kwargs for inclusion in tlv stream
                     merkle_root = _tlv_merkle_root(sign_over_tlvs)
                     priv = ecc.ECPrivkey(signing_key)
-                    tag = b'lightning' + tlv_stream_name.encode('utf-8') + b'signature'
+                    tag = b'lightning' + tlv_stream_name.encode('ascii') + b'signature'
                     signature = priv.schnorr_sign(ecc.bip340_tagged_hash(tag, merkle_root))
                     kwargs[tlv_record_name] = {'sig': signature}
             with io.BytesIO() as tlv_record_fd:
@@ -577,7 +577,7 @@ class LNSerializer:
                 _write_tlv_record(fd=fd, tlv_type=tlv_record_type, tlv_val=tlv_val)
 
                 # if we need to sign the tlvs, we need the entire TLV, so serialize again
-                # and collect in `tlvs`
+                # and collect in `sign_over_tlvs`
                 if signing_key and tlv_record_name != 'signature':
                     with io.BytesIO() as tlvfd:
                         _write_tlv_record(fd=tlvfd, tlv_type=tlv_record_type, tlv_val=tlv_val)
