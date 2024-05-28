@@ -143,6 +143,8 @@ def _read_field(*, fd: io.BytesIO, field_type: str, count: Union[int, str]) -> U
         type_len = 32
     elif field_type == 'signature':
         type_len = 64
+    elif field_type == 'bip340sig':
+        type_len = 64
     elif field_type == 'point':
         type_len = 33
     elif field_type == 'short_channel_id':
@@ -232,6 +234,8 @@ def _write_field(*, fd: io.BytesIO, field_type: str, count: Union[int, str],
     elif field_type == 'sha256':
         type_len = 32
     elif field_type == 'signature':
+        type_len = 64
+    elif field_type == 'bip340sig':
         type_len = 64
     elif field_type == 'point':
         type_len = 33
