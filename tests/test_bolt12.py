@@ -25,8 +25,8 @@ class TestBolt12(ElectrumTestCase):
         self.assertTrue(is_offer(offer))
         od = decode_offer(offer)
         self.assertEqual(od, {'offer_description': {'description': "Offer by rusty's node"},
-                              'offer_node_id':
-                                  {'node_id': bfh('023f3219da03ee29a12de4107e6c5c364f607382f065f2bfed91ddd6b91079bfbc')}
+                              'offer_issuer_id':
+                                  {'id': bfh('023f3219da03ee29a12de4107e6c5c364f607382f065f2bfed91ddd6b91079bfbc')}
                               })
 
         offer = 'lno1pqqnyzsmx5cx6umpwssx6atvw35j6ut4v9h8g6t50ysx7enxv4epyrmjw4ehgcm0wfczucm0d5hxzag5qqtzzq3lxgva5qlw9xsjmeqs0ek9cdj0vpec9ur972l7mywa66u3q7dlhs'
@@ -38,8 +38,8 @@ class TestBolt12(ElectrumTestCase):
                               'offer_description': {'description': '50msat multi-quantity offer'},
                               'offer_issuer': {'issuer': 'rustcorp.com.au'},
                               'offer_quantity_max': {'max': 0},
-                              'offer_node_id':
-                                  {'node_id': bfh('023f3219da03ee29a12de4107e6c5c364f607382f065f2bfed91ddd6b91079bfbc')}
+                              'offer_issuer_id':
+                                  {'id': bfh('023f3219da03ee29a12de4107e6c5c364f607382f065f2bfed91ddd6b91079bfbc')}
                               })
 
         # TODO: tests below use recurrence (tlv record type 26) which is not supported/generated from wire specs
@@ -102,7 +102,7 @@ class TestBolt12(ElectrumTestCase):
 
         od = decode_offer(offer)
         self.assertEqual(od['offer_description']['description'], 'first test offer')
-        self.assertEqual(od['offer_node_id']['node_id'], bfh('03d430b71fd7d4f0f6df575be7d9f33b0fa549c152dc03f4fc13ee2a393d4a2a5a'))
+        self.assertEqual(od['offer_issuer_id']['id'], bfh('03d430b71fd7d4f0f6df575be7d9f33b0fa549c152dc03f4fc13ee2a393d4a2a5a'))
 
     def test_decode_invreq(self):
         invreq = 'lnr1pggxv6tjwd6zqar9wd6zqmmxvejhy93pq02rpdcl6l20pakl2ad70k0n8v862jwp2twq8a8uz0hz5wfafg495'
@@ -112,7 +112,7 @@ class TestBolt12(ElectrumTestCase):
 
         od = decode_invoice_request(invreq)
         self.assertEqual(od['offer_description']['description'], 'first test offer')
-        self.assertEqual(od['offer_node_id']['node_id'], bfh('03d430b71fd7d4f0f6df575be7d9f33b0fa549c152dc03f4fc13ee2a393d4a2a5a'))
+        self.assertEqual(od['offer_issuer_id']['id'], bfh('03d430b71fd7d4f0f6df575be7d9f33b0fa549c152dc03f4fc13ee2a393d4a2a5a'))
 
     def test_encode_invoice(self):
         data = {'offer_metadata': {'data': bfh('01020304050607')},
@@ -124,7 +124,7 @@ class TestBolt12(ElectrumTestCase):
     def test_subtype_encode_decode(self):
         offer = 'lno1pggxv6tjwd6zqar9wd6zqmmxvejhy93pq02rpdcl6l20pakl2ad70k0n8v862jwp2twq8a8uz0hz5wfafg495'
         od = decode_offer(offer)
-        data = {'offer_node_id': od['offer_node_id']}
+        data = {'offer_issuer_id': od['offer_issuer_id']}
         invreq_pl_tlv = encode_invoice_request(data, payer_key=bfh('4141414141414141414141414141414141414141414141414141414141414141'))
 
         ohds = OnionHopsDataSingle(tlv_stream_name='onionmsg_tlv',
