@@ -164,6 +164,9 @@ def _read_field(*, fd: io.BytesIO, field_type: str, count: Union[int, str]) -> U
         if len(buf) != type_len:
             raise UnexpectedEndOfStream()
         return buf
+    elif field_type == 'utf8':
+        if count != '...':
+            raise Exception(f"utf8 fields can only have unbounded count")
 
     if count == "...":
         total_len = -1  # read all
@@ -175,6 +178,10 @@ def _read_field(*, fd: io.BytesIO, field_type: str, count: Union[int, str]) -> U
     buf = fd.read(total_len)
     if total_len >= 0 and len(buf) != total_len:
         raise UnexpectedEndOfStream()
+
+    if field_type == 'utf8':
+        return buf.decode('utf-8')
+
     return buf
 
 
@@ -252,6 +259,10 @@ def _write_field(*, fd: io.BytesIO, field_type: str, count: Union[int, str],
             type_len = 33  # point
         else:
             raise Exception(f"invalid sciddir_or_pubkey, prefix byte not in range 0-3")
+    elif field_type == 'utf8':
+        if count != '...':
+            raise Exception(f"utf8 fields can only have unbounded count")
+        value = value.encode('utf-8')
     total_len = -1
     if count != "...":
         if type_len is None:
