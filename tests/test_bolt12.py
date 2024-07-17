@@ -1,6 +1,6 @@
 import io
 
-from electrum import segwit_addr, lnmsg
+from electrum import segwit_addr
 from electrum import bolt12
 from electrum.bolt12 import is_offer, decode_offer, encode_invoice_request, decode_invoice_request, encode_invoice
 from electrum.lnmsg import UnknownMandatoryTLVRecordType, _tlv_merkle_root, OnionWireSerializer
@@ -24,9 +24,9 @@ class TestBolt12(ElectrumTestCase):
         self.assertEqual(d.hrp, 'lno', "wrong hrp")
         self.assertTrue(is_offer(offer))
         od = decode_offer(offer)
-        self.assertEqual(od, {'offer_description': {'description': b"Offer by rusty's node"},
+        self.assertEqual(od, {'offer_description': {'description': "Offer by rusty's node"},
                               'offer_node_id':
-                                  {'node_id': b'\x02?2\x19\xda\x03\xee)\xa1-\xe4\x10~l\\6O`s\x82\xf0e\xf2\xbf\xed\x91\xdd\xd6\xb9\x10y\xbf\xbc'}
+                                  {'node_id': bfh('023f3219da03ee29a12de4107e6c5c364f607382f065f2bfed91ddd6b91079bfbc')}
                               })
 
         offer = 'lno1pqqnyzsmx5cx6umpwssx6atvw35j6ut4v9h8g6t50ysx7enxv4epyrmjw4ehgcm0wfczucm0d5hxzag5qqtzzq3lxgva5qlw9xsjmeqs0ek9cdj0vpec9ur972l7mywa66u3q7dlhs'
@@ -35,11 +35,11 @@ class TestBolt12(ElectrumTestCase):
         self.assertEqual(d.hrp, 'lno', "wrong hrp")
         od = decode_offer(offer)
         self.assertEqual(od, {'offer_amount': {'amount': 50},
-                              'offer_description': {'description': b'50msat multi-quantity offer'},
-                              'offer_issuer': {'issuer': b'rustcorp.com.au'},
+                              'offer_description': {'description': '50msat multi-quantity offer'},
+                              'offer_issuer': {'issuer': 'rustcorp.com.au'},
                               'offer_quantity_max': {'max': 0},
                               'offer_node_id':
-                                  {'node_id': b'\x02?2\x19\xda\x03\xee)\xa1-\xe4\x10~l\\6O`s\x82\xf0e\xf2\xbf\xed\x91\xdd\xd6\xb9\x10y\xbf\xbc'}
+                                  {'node_id': bfh('023f3219da03ee29a12de4107e6c5c364f607382f065f2bfed91ddd6b91079bfbc')}
                               })
 
         # TODO: tests below use recurrence (tlv record type 26) which is not supported/generated from wire specs
@@ -101,7 +101,7 @@ class TestBolt12(ElectrumTestCase):
         self.assertTrue(is_offer(offer))
 
         od = decode_offer(offer)
-        self.assertEqual(od['offer_description']['description'], b'first test offer')
+        self.assertEqual(od['offer_description']['description'], 'first test offer')
         self.assertEqual(od['offer_node_id']['node_id'], bfh('03d430b71fd7d4f0f6df575be7d9f33b0fa549c152dc03f4fc13ee2a393d4a2a5a'))
 
     def test_decode_invreq(self):
@@ -111,13 +111,13 @@ class TestBolt12(ElectrumTestCase):
         self.assertEqual(d.hrp, 'lnr', "wrong hrp")
 
         od = decode_invoice_request(invreq)
-        self.assertEqual(od['offer_description']['description'], b'first test offer')
+        self.assertEqual(od['offer_description']['description'], 'first test offer')
         self.assertEqual(od['offer_node_id']['node_id'], bfh('03d430b71fd7d4f0f6df575be7d9f33b0fa549c152dc03f4fc13ee2a393d4a2a5a'))
 
     def test_encode_invoice(self):
         data = {'offer_metadata': {'data': bfh('01020304050607')},
                 'offer_amount': {'amount': 1},
-                'offer_description': {'description': b'test_encode_invoice'}}
+                'offer_description': {'description': 'test_encode_invoice'}}
         invoice_tlv = encode_invoice(data, signing_key=bfh('4141414141414141414141414141414141414141414141414141414141414141'))
         self.assertEqual(invoice_tlv, bfh('0407010203040506070801010a13746573745f656e636f64655f696e766f696365f04013b55efc08ebd43b8971d98d2c8cb9f404e674d6f8842fad7347a7f2e2b1fe52c4a59774e7ede6e585ad6a089adb003e1ee24a9f50b27b871855c1ca0a2272c2'))
 

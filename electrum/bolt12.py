@@ -22,12 +22,17 @@
 # ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
-
+import asyncio
+import copy
 import io
+import os
 import time
 
+from . import ecc
 from .lnmsg import OnionWireSerializer
+from .onion_message import Timeout
 from .segwit_addr import bech32_decode, DecodedBech32, convertbits
+from .util import OldTaskGroup
 
 
 def is_offer(data: str):
@@ -79,5 +84,55 @@ def encode_invoice(data, signing_key):
         return fd.getvalue()
 
 
-async def request_invoice(bolt12_offer):
-    time.sleep(5)
+async def request_invoice(lnwallet: 'LNWallet', bolt12_offer, amount_msat: int, note: str):
+    #   - if it chooses to sends an `invoice_request`, it sends an onion message:
+    #     - if `offer_paths` is set:
+    #       - MUST send the onion message via any path in `offer_paths` to the final `onion_msg_hop`.`blinded_node_id` in that path
+    #     - otherwise:
+    #       - MUST send the onion message to `offer_issuer_id`
+    #     - MAY send more than one `invoice_request` onion message at once.
+    # TODO: offer_paths
+    node_id = bolt12_offer['offer_issuer_id']['id']
+
+    session_key = os.urandom(32)
+    blinding = ecc.ECPrivkey(session_key).get_public_key_bytes()
+
+    # One is a response to an offer; this contains the `offer_issuer_id` or `offer_paths` and
+    # all other offer details, and is generally received over an onion
+    # message: if it's valid and refers to a known offer, the response is
+    # generally to reply with an `invoice` using the `reply_path` field of
+    # the onion message.
+    data = copy.deepcopy(bolt12_offer)  # include all fields of the offer
+    data.update({
+        'invreq_payer_id': {'key': blinding},
+        'invreq_metadata': {'blob': b'\x00'},  # TODO: fill invreq_metadata unique, and store for association
+        'invreq_amount': {'msat': amount_msat}
+    })
+
+    invreq_tlv = encode_invoice_request(data, session_key)
+    req_payload = {
+        'invoice_request': {'invoice_request': invreq_tlv}
+    }
+
+    try:
+        lnwallet.logger.info(f'requesting bolt12 invoice')
+        rcpt_data, payload = await lnwallet.onion_message_manager.submit_reqrpy(payload=req_payload, node_id_or_blinded_path=node_id)
+        lnwallet.logger.info(f'{rcpt_data=} {payload=}')
+        invoice_tlv = payload['invoice']['invoice']
+        with io.BytesIO(invoice_tlv) as fd:
+            invoice_data = OnionWireSerializer.read_tlv_stream(fd=fd, tlv_stream_name='invoice')
+        lnwallet.logger.warning(f'invoice_data: {invoice_data!r}')
+    except Timeout:
+        lnwallet.logger.info('timeout waiting for bolt12 invoice')
+        raise
+    except Exception as e:
+        lnwallet.logger.error(f'error requesting bolt12 invoice: {e!r}')
+        raise
+
+    return invoice_data
+
+    #
+    # try:
+    #     ids, complete = await util.wait_for2(self.get_channel_range(), LN_P2P_NETWORK_TIMEOUT)
+    # except asyncio.TimeoutError as e:
+    #     raise GracefulDisconnect("query_channel_range timed out") from e
