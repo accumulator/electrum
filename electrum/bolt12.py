@@ -43,33 +43,42 @@ def is_offer(data: str):
 
 
 def decode_offer(data):
-    d = bech32_decode(data, ignore_long_length=True, with_checksum=False)
-    d = bytes(convertbits(d.data, 5, 8))
-    # we bomb on trailing 0, remove
-    while d[-1] == 0:
-        d = d[:-1]
-    f = io.BytesIO(d)
-    return OnionWireSerializer.read_tlv_stream(fd=f, tlv_stream_name='offer')
+    if isinstance(data, str):
+        d = bech32_decode(data, ignore_long_length=True, with_checksum=False)
+        d = bytes(convertbits(d.data, 5, 8))
+        # we bomb on trailing 0, remove
+        while d[-1] == 0:
+            d = d[:-1]
+    else:
+        d = data
+    with io.BytesIO(d) as f:
+        return OnionWireSerializer.read_tlv_stream(fd=f, tlv_stream_name='offer')
 
 
 def decode_invoice_request(data):
-    d = bech32_decode(data, ignore_long_length=True, with_checksum=False)
-    d = bytes(convertbits(d.data, 5, 8))
-    # we bomb on trailing 0, remove
-    while d[-1] == 0:
-        d = d[:-1]
-    f = io.BytesIO(d)
-    return OnionWireSerializer.read_tlv_stream(fd=f, tlv_stream_name='invoice_request')
+    if isinstance(data, str):
+        d = bech32_decode(data, ignore_long_length=True, with_checksum=False)
+        d = bytes(convertbits(d.data, 5, 8))
+        # we bomb on trailing 0, remove
+        while d[-1] == 0:
+            d = d[:-1]
+    else:
+        d = data
+    with io.BytesIO(d) as f:
+        return OnionWireSerializer.read_tlv_stream(fd=f, tlv_stream_name='invoice_request', signing_key_path=['invreq_payer_id', 'key'])
 
 
 def decode_invoice(data):
-    d = bech32_decode(data, ignore_long_length=True, with_checksum=False)
-    d = bytes(convertbits(d.data, 5, 8))
-    # we bomb on trailing 0, remove
-    while d[-1] == 0:
-        d = d[:-1]
-    f = io.BytesIO(d)
-    return OnionWireSerializer.read_tlv_stream(fd=f, tlv_stream_name='invoice')
+    if isinstance(data, str):
+        d = bech32_decode(data, ignore_long_length=True, with_checksum=False)
+        d = bytes(convertbits(d.data, 5, 8))
+        # we bomb on trailing 0, remove
+        while d[-1] == 0:
+            d = d[:-1]
+    else:
+        d = data
+    with io.BytesIO(d) as f:
+        return OnionWireSerializer.read_tlv_stream(fd=f, tlv_stream_name='invoice', signing_key_path=['invoice_node_id', 'node_id'])
 
 
 def encode_invoice_request(data, payer_key):
@@ -120,7 +129,8 @@ async def request_invoice(lnwallet: 'LNWallet', bolt12_offer, amount_msat: int, 
         lnwallet.logger.info(f'{rcpt_data=} {payload=}')
         invoice_tlv = payload['invoice']['invoice']
         with io.BytesIO(invoice_tlv) as fd:
-            invoice_data = OnionWireSerializer.read_tlv_stream(fd=fd, tlv_stream_name='invoice')
+            invoice_data = OnionWireSerializer.read_tlv_stream(fd=fd, tlv_stream_name='invoice',
+                                                               signing_key_path=('invoice_node_id', 'node_id'))
         lnwallet.logger.warning(f'invoice_data: {invoice_data!r}')
     except Timeout:
         lnwallet.logger.info('timeout waiting for bolt12 invoice')

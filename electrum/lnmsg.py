@@ -281,10 +281,15 @@ def _write_field(*, fd: io.BytesIO, field_type: str, count: Union[int, str],
 
 def _read_tlv_record(*, fd: io.BytesIO) -> Tuple[int, bytes]:
     if not fd: raise Exception()
+    pos_start = fd.seek(0, 1)
     tlv_type = _read_field(fd=fd, field_type="bigsize", count=1)
     tlv_len = _read_field(fd=fd, field_type="bigsize", count=1)
     tlv_val = _read_field(fd=fd, field_type="byte", count=tlv_len)
-    return tlv_type, tlv_val
+    pos_end = fd.seek(0, 1)
+    rawlen = pos_end - pos_start
+    fd.seek(-rawlen, 1)
+    rawbytes = fd.read(rawlen)
+    return tlv_type, tlv_val, rawbytes
 
 
 def _write_tlv_record(*, fd: io.BytesIO, tlv_type: int, tlv_val: bytes) -> None:
@@ -339,7 +344,7 @@ def _tlv_merkle_root(tlvs: List[Sequence[bytes]]) -> bytes:
     first_tlv = None
     tlv_merkle_nodes = []
 
-    for tlv, tlvt in tlvs:
+    for tlvt, tlv in tlvs:
         if first_tlv is None:
             first_tlv = tlv
         tlv_val = tlv
@@ -589,14 +594,18 @@ class LNSerializer:
                 if signing_key and tlv_record_name != 'signature':
                     with io.BytesIO() as tlvfd:
                         _write_tlv_record(fd=tlvfd, tlv_type=tlv_record_type, tlv_val=tlv_val)
-                        sign_over_tlvs.append((tlvfd.getvalue(), tlv_record_type))
+                        sign_over_tlvs.append((tlv_record_type, tlvfd.getvalue()))
 
-    def read_tlv_stream(self, *, fd: io.BytesIO, tlv_stream_name: str) -> Dict[str, Dict[str, Any]]:
+    def read_tlv_stream(self, *,
+                        fd: io.BytesIO,
+                        tlv_stream_name: str,
+                        signing_key_path: str = None) -> Dict[str, Dict[str, Any]]:
+        sign_over_tlvs = []
         parsed = {}  # type: Dict[str, Dict[str, Any]]
         scheme_map = self.in_tlv_stream_get_tlv_record_scheme_from_type[tlv_stream_name]
         last_seen_tlv_record_type = -1  # type: int
         while _num_remaining_bytes_to_read(fd) > 0:
-            tlv_record_type, tlv_record_val = _read_tlv_record(fd=fd)
+            tlv_record_type, tlv_record_val, rawbytes = _read_tlv_record(fd=fd)
             if not (tlv_record_type > last_seen_tlv_record_type):
                 raise MsgInvalidFieldOrder(f"TLV records must be monotonically increasing by type. "
                                            f"cur: {tlv_record_type}. prev: {last_seen_tlv_record_type}")
@@ -611,6 +620,20 @@ class LNSerializer:
                     # unknown "odd" type: skip it
                     continue
             tlv_record_name = self.in_tlv_stream_get_record_name_from_type[tlv_stream_name][tlv_record_type]
+            # collect tlvs for signature check
+            if signing_key_path:
+                if tlv_record_name == 'signature':
+                    # verify
+                    merkle_root = _tlv_merkle_root(sign_over_tlvs)
+                    signature = tlv_record_val
+                    tag = b'lightning' + tlv_stream_name.encode('ascii') + b'signature'
+                    tagh = bitcoin.bip340_tagged_hash(tag, merkle_root)
+                    signing_key = parsed[signing_key_path[0]][signing_key_path[1]]  # TODO: always 2-level?
+                    correct = ecc.ECPubkey(signing_key).schnorr_verify(signature, tagh)
+                    if not correct:
+                        raise Exception('invalid signature')
+                else:
+                    sign_over_tlvs.append((tlv_record_type, rawbytes))
             parsed[tlv_record_name] = {}
             with io.BytesIO(tlv_record_val) as tlv_record_fd:
                 for row in scheme:

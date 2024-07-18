@@ -2,7 +2,9 @@ import io
 
 from electrum import segwit_addr
 from electrum import bolt12
-from electrum.bolt12 import is_offer, decode_offer, encode_invoice_request, decode_invoice_request, encode_invoice
+from electrum.bolt12 import is_offer, decode_offer, encode_invoice_request, decode_invoice_request, encode_invoice, \
+    decode_invoice
+from electrum.ecc import ECPrivkey
 from electrum.lnmsg import UnknownMandatoryTLVRecordType, _tlv_merkle_root, OnionWireSerializer
 from electrum.lnonion import OnionHopsDataSingle
 from electrum.segwit_addr import INVALID_BECH32
@@ -179,6 +181,17 @@ class TestBolt12(ElectrumTestCase):
         invreq_pl_tlv = encode_invoice_request(data, payer_key)
 
         self.assertEqual(invreq_pl_tlv, bfh('0008000000000000000006035553440801640a1741204d617468656d61746963616c205472656174697365162102eec7245d6b7d2ccb30380bfbe2a3648cd7a942653f5aa340edcea1f28368661958210324653eac434488002cc06bbfb7f10fe18991e35f9fe4302dbea6d2353dc0ab1cf040b8f83ea3288cfd6ea510cdb481472575141e8d8744157f98562d162cc1c472526fdb24befefbdebab4dbb726bbd1b7d8aec057f8fa805187e5950d2bbe0e5642'))
+
+    def test_schnorr_signature(self):
+        # encode+decode invoice to test signature
+        signing_key = bfh('4242424242424242424242424242424242424242424242424242424242424242')
+        signing_pubkey = ECPrivkey(signing_key).get_public_key_bytes()
+        invoice_tlv = encode_invoice({
+            'offer_amount': {'amount': 1},
+            'offer_description': {'description': 'test'},
+            'invoice_node_id': {'node_id': signing_pubkey}
+        }, signing_key)
+        decode_invoice(invoice_tlv)
 
     def test_serde_complex_fields(self):
         payer_key = bfh('4141414141414141414141414141414141414141414141414141414141414141')
