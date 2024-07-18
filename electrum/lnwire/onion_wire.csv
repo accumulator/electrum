@@ -177,6 +177,8 @@ tlvtype,invoice_request,invreq_payer_id,88
 tlvdata,invoice_request,invreq_payer_id,key,point,
 tlvtype,invoice_request,invreq_payer_note,89
 tlvdata,invoice_request,invreq_payer_note,note,utf8,...
+tlvtype,invoice_request,invreq_paths,90
+tlvdata,invoice_request,invreq_paths,paths,blinded_path,...
 tlvtype,invoice_request,signature,240
 tlvdata,invoice_request,signature,sig,bip340sig,
 tlvtype,invoice,invreq_metadata,0
@@ -215,6 +217,8 @@ tlvtype,invoice,invreq_payer_id,88
 tlvdata,invoice,invreq_payer_id,key,point,
 tlvtype,invoice,invreq_payer_note,89
 tlvdata,invoice,invreq_payer_note,note,utf8,...
+tlvtype,invoice,invreq_paths,90
+tlvdata,invoice,invreq_paths,paths,blinded_path,...
 tlvtype,invoice,invoice_paths,160
 tlvdata,invoice,invoice_paths,paths,blinded_path,...
 tlvtype,invoice,invoice_blindedpay,162
