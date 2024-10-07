@@ -60,7 +60,7 @@ WizardComponent {
         return valid = true
     }
 
-    ColumnLayout {
+    content: ColumnLayout {
         width: parent.width
 
         Label {

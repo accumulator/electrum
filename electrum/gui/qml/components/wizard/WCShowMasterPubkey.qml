@@ -11,7 +11,7 @@ WizardComponent {
 
     property string masterPubkey: wizard_data['multisig_master_pubkey']
 
-    ColumnLayout {
+    content: ColumnLayout {
         width: parent.width
 
         Label {

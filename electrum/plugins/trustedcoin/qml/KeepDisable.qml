@@ -16,7 +16,7 @@ WizardComponent {
         onCheckedButtonChanged: checkIsLast()
     }
 
-    ColumnLayout {
+    content: ColumnLayout {
         Label {
             text: qsTr('Restore 2FA wallet')
         }

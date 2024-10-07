@@ -11,7 +11,7 @@ WizardComponent {
         wizard_data['wallet_name'] = wallet_name.text
     }
 
-    ColumnLayout {
+    content: ColumnLayout {
         width: parent.width
 
         Label {

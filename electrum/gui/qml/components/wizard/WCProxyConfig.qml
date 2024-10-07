@@ -12,7 +12,7 @@ WizardComponent {
         wizard_data['proxy'] = pc.toProxyDict()
     }
 
-    ColumnLayout {
+    content: ColumnLayout {
         width: parent.width
         spacing: constants.paddingLarge
 

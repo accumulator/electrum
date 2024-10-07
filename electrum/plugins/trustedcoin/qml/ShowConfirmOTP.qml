@@ -12,7 +12,7 @@ WizardComponent {
 
     property bool otpVerified: false
 
-    ColumnLayout {
+    content: ColumnLayout {
         width: parent.width
 
         Label {

@@ -11,7 +11,7 @@ WizardComponent {
 
     property QtObject plugin
 
-    ColumnLayout {
+    content: ColumnLayout {
         width: parent.width
 
         Image {

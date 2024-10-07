@@ -7,6 +7,8 @@ import org.electrum 1.0
 import "../controls"
 
 WizardComponent {
+    id: root
+
     securePage: true
 
     valid: seedtext.text != '' && extendcb.checked ? customwordstext.text != '' : true
@@ -34,59 +36,56 @@ WizardComponent {
         warningtext.text = t.join(' ')
     }
 
-    Flickable {
-        anchors.fill: parent
-        contentHeight: mainLayout.height
-        clip:true
-        interactive: height < contentHeight
+    content: ColumnLayout {
+        width: parent.width
 
-        GridLayout {
-            id: mainLayout
-            width: parent.width
-            columns: 1
+        InfoTextArea {
+            id: warningtext
+            Layout.fillWidth: true
+            iconStyle: InfoTextArea.IconStyle.Warn
+        }
 
-            InfoTextArea {
-                id: warningtext
-                Layout.fillWidth: true
-                iconStyle: InfoTextArea.IconStyle.Warn
+        Label {
+            Layout.topMargin: constants.paddingMedium
+            Layout.fillWidth: true
+            wrapMode: Text.Wrap
+            text: qsTr('Your wallet generation seed is:')
+        }
+
+        SeedTextArea {
+            id: seedtext
+            readOnly: true
+            Layout.fillWidth: true
+
+            BusyIndicator {
+                anchors.centerIn: parent
+                height: parent.height * 2/3
+                visible: seedtext.text == ''
             }
+        }
 
-            Label {
-                Layout.topMargin: constants.paddingMedium
-                Layout.fillWidth: true
-                wrapMode: Text.Wrap
-                text: qsTr('Your wallet generation seed is:')
-            }
-
-            SeedTextArea {
-                id: seedtext
-                readOnly: true
-                Layout.fillWidth: true
-
-                BusyIndicator {
-                    anchors.centerIn: parent
-                    height: parent.height * 2/3
-                    visible: seedtext.text == ''
+        ElCheckBox {
+            id: extendcb
+            Layout.fillWidth: true
+            text: qsTr('Extend seed with custom words')
+            onCheckedChanged: {
+                if (checked) {
+                    customwordstext.forceActiveFocus()
+                    root.ensureVisible(customwordstext)
                 }
             }
+        }
 
-            ElCheckBox {
-                id: extendcb
-                Layout.fillWidth: true
-                text: qsTr('Extend seed with custom words')
-            }
+        TextField {
+            id: customwordstext
+            visible: extendcb.checked
+            Layout.fillWidth: true
+            placeholderText: qsTr('Enter your custom word(s)')
+            inputMethodHints: Qt.ImhSensitiveData | Qt.ImhNoPredictiveText | Qt.ImhNoAutoUppercase
+        }
 
-            TextField {
-                id: customwordstext
-                visible: extendcb.checked
-                Layout.fillWidth: true
-                placeholderText: qsTr('Enter your custom word(s)')
-                inputMethodHints: Qt.ImhNoPredictiveText
-            }
-
-            Component.onCompleted : {
-                setWarningText(12)
-            }
+        Component.onCompleted : {
+            setWarningText(12)
         }
     }
 

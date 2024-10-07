@@ -15,7 +15,7 @@ WizardComponent {
         id: keystoregroup
     }
 
-    ColumnLayout {
+    content: ColumnLayout {
         width: parent.width
         Label {
             text: qsTr('Do you want to create a new seed, or restore a wallet using an existing seed?')

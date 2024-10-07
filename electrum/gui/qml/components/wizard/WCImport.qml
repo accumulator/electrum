@@ -24,7 +24,7 @@ WizardComponent {
         return bitcoin.isAddressList(text) || bitcoin.isPrivateKeyList(text)
     }
 
-    ColumnLayout {
+    content: ColumnLayout {
         width: parent.width
         height: parent.height
         InfoTextArea {

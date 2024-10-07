@@ -14,7 +14,7 @@ WizardComponent {
         wizard_data['server'] = sc.address
     }
 
-    ColumnLayout {
+    content: ColumnLayout {
         anchors.fill: parent
         spacing: constants.paddingLarge
 

@@ -127,7 +127,7 @@ Pane {
             Layout.fillWidth: true
             Layout.preferredHeight: kbd.width / 1.75
             visible: !root.readOnly
-            onKeyEvent: {
+            onKeyEvent: (keycode, text) => {
                 if (keycode == Qt.Key_Backspace) {
                     if (seedtextarea.text.length > 0)
                         seedtextarea.text = seedtextarea.text.substring(0, seedtextarea.text.length-1)

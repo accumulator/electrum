@@ -62,6 +62,7 @@ Dialog {
         }
     }
 
+    spacing: 0
     header: ColumnLayout {
         spacing: 0
 

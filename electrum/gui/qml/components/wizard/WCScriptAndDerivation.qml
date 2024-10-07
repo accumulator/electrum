@@ -88,135 +88,128 @@ WizardComponent {
         }
     }
 
-    Flickable {
-        anchors.fill: parent
-        contentHeight: mainLayout.height
-        clip:true
-        interactive: height < contentHeight
+    content: ColumnLayout {
+        id: mainLayout
+        width: parent.width
 
-        ColumnLayout {
-            id: mainLayout
-            width: parent.width
-
-            Label {
-                Layout.fillWidth: true
-                text: qsTr('Choose the type of addresses in your wallet.')
-                wrapMode: Text.Wrap
-            }
-
-            // standard
-            ElRadioButton {
-                Layout.fillWidth: true
-                ButtonGroup.group: scripttypegroup
-                property string scripttype: 'p2pkh'
-                text: qsTr('legacy (p2pkh)')
-                visible: !isMultisig
-            }
-            ElRadioButton {
-                Layout.fillWidth: true
-                ButtonGroup.group: scripttypegroup
-                property string scripttype: 'p2wpkh-p2sh'
-                text: qsTr('wrapped segwit (p2wpkh-p2sh)')
-                visible: !isMultisig
-            }
-            ElRadioButton {
-                Layout.fillWidth: true
-                ButtonGroup.group: scripttypegroup
-                property string scripttype: 'p2wpkh'
-                checked: !isMultisig
-                text: qsTr('native segwit (p2wpkh)')
-                visible: !isMultisig
-            }
-
-            // multisig
-            ElRadioButton {
-                Layout.fillWidth: true
-                ButtonGroup.group: scripttypegroup
-                property string scripttype: 'p2sh'
-                text: qsTr('legacy multisig (p2sh)')
-                visible: isMultisig
-                enabled: !cosigner || wizard_data['script_type'] == 'p2sh'
-                checked: cosigner ? wizard_data['script_type'] == 'p2sh' : false
-            }
-            ElRadioButton {
-                Layout.fillWidth: true
-                ButtonGroup.group: scripttypegroup
-                property string scripttype: 'p2wsh-p2sh'
-                text: qsTr('p2sh-segwit multisig (p2wsh-p2sh)')
-                visible: isMultisig
-                enabled: !cosigner || wizard_data['script_type'] == 'p2wsh-p2sh'
-                checked: cosigner ? wizard_data['script_type'] == 'p2wsh-p2sh' : false
-            }
-            ElRadioButton {
-                Layout.fillWidth: true
-                ButtonGroup.group: scripttypegroup
-                property string scripttype: 'p2wsh'
-                text: qsTr('native segwit multisig (p2wsh)')
-                visible: isMultisig
-                enabled: !cosigner || wizard_data['script_type'] == 'p2wsh'
-                checked: cosigner ? wizard_data['script_type'] == 'p2wsh' : isMultisig
-            }
-
-            InfoTextArea {
-                Layout.fillWidth: true
-                text: qsTr('You can override the suggested derivation path.') + ' ' +
-                    qsTr('If you are not sure what this is, leave this field unchanged.')
-            }
-
-            Label {
-                text: qsTr('Derivation path')
-            }
-
-            TextField {
-                id: derivationpathtext
-                Layout.fillWidth: true
-                Layout.leftMargin: constants.paddingMedium
-                inputMethodHints: Qt.ImhNoPredictiveText
-
-                onTextChanged: validate()
-            }
-
-            InfoTextArea {
-                id: validationtext
-                Layout.fillWidth: true
-                visible: text
-                iconStyle: InfoTextArea.IconStyle.Error
-            }
-
-            Pane {
-                Layout.alignment: Qt.AlignHCenter
-                Layout.topMargin: constants.paddingLarge
-                padding: 0
-                visible: !isMultisig
-                background: Rectangle {
-                    color: Qt.lighter(Material.dialogColor, 1.5)
-                }
-
-                FlatButton {
-                    text: qsTr('Detect Existing Accounts')
-                    onClicked: {
-                        var dialog = bip39recoveryDialog.createObject(mainLayout, {
-                            walletType: wizard_data['wallet_type'],
-                            seed: wizard_data['seed'],
-                            seedExtraWords: wizard_data['seed_extra_words']
-                        })
-                        dialog.accepted.connect(function () {
-                            // select matching script type button and set derivation path
-                            for (var i = 0; i < scripttypegroup.buttons.length; i++) {
-                                var btn = scripttypegroup.buttons[i]
-                                if (btn.visible && btn.scripttype == dialog.scriptType) {
-                                    btn.checked = true
-                                    derivationpathtext.text = dialog.derivationPath
-                                    return
-                                }
-                            }
-                        })
-                        dialog.open()
-                    }
-                }
-            }
-
+        Label {
+            Layout.fillWidth: true
+            text: qsTr('Choose the type of addresses in your wallet.')
+            wrapMode: Text.Wrap
         }
+
+        // standard
+        ElRadioButton {
+            Layout.fillWidth: true
+            ButtonGroup.group: scripttypegroup
+            property string scripttype: 'p2pkh'
+            text: qsTr('legacy (p2pkh)')
+            visible: !isMultisig
+        }
+        ElRadioButton {
+            Layout.fillWidth: true
+            ButtonGroup.group: scripttypegroup
+            property string scripttype: 'p2wpkh-p2sh'
+            text: qsTr('wrapped segwit (p2wpkh-p2sh)')
+            visible: !isMultisig
+        }
+        ElRadioButton {
+            Layout.fillWidth: true
+            ButtonGroup.group: scripttypegroup
+            property string scripttype: 'p2wpkh'
+            checked: !isMultisig
+            text: qsTr('native segwit (p2wpkh)')
+            visible: !isMultisig
+        }
+
+        // multisig
+        ElRadioButton {
+            Layout.fillWidth: true
+            ButtonGroup.group: scripttypegroup
+            property string scripttype: 'p2sh'
+            text: qsTr('legacy multisig (p2sh)')
+            visible: isMultisig
+            enabled: !cosigner || wizard_data['script_type'] == 'p2sh'
+            checked: cosigner ? wizard_data['script_type'] == 'p2sh' : false
+        }
+        ElRadioButton {
+            Layout.fillWidth: true
+            ButtonGroup.group: scripttypegroup
+            property string scripttype: 'p2wsh-p2sh'
+            text: qsTr('p2sh-segwit multisig (p2wsh-p2sh)')
+            visible: isMultisig
+            enabled: !cosigner || wizard_data['script_type'] == 'p2wsh-p2sh'
+            checked: cosigner ? wizard_data['script_type'] == 'p2wsh-p2sh' : false
+        }
+        ElRadioButton {
+            Layout.fillWidth: true
+            ButtonGroup.group: scripttypegroup
+            property string scripttype: 'p2wsh'
+            text: qsTr('native segwit multisig (p2wsh)')
+            visible: isMultisig
+            enabled: !cosigner || wizard_data['script_type'] == 'p2wsh'
+            checked: cosigner ? wizard_data['script_type'] == 'p2wsh' : isMultisig
+        }
+
+        InfoTextArea {
+            Layout.fillWidth: true
+            text: qsTr('You can override the suggested derivation path.') + ' ' +
+                qsTr('If you are not sure what this is, leave this field unchanged.')
+        }
+
+        Label {
+            text: qsTr('Derivation path')
+        }
+
+        TextField {
+            id: derivationpathtext
+            Layout.fillWidth: true
+            Layout.leftMargin: constants.paddingMedium
+            inputMethodHints: Qt.ImhNoPredictiveText
+
+            onTextChanged: validate()
+        }
+
+        InfoTextArea {
+            id: validationtext
+            Layout.fillWidth: true
+            visible: text
+            iconStyle: InfoTextArea.IconStyle.Error
+        }
+
+        Pane {
+            Layout.alignment: Qt.AlignHCenter
+            Layout.topMargin: constants.paddingLarge
+            padding: 0
+            visible: !isMultisig
+            background: Rectangle {
+                color: Qt.lighter(Material.dialogColor, 1.5)
+            }
+
+            FlatButton {
+                text: qsTr('Detect Existing Accounts')
+                onClicked: {
+                    var dialog = bip39recoveryDialog.createObject(mainLayout, {
+                        walletType: wizard_data['wallet_type'],
+                        seed: wizard_data['seed'],
+                        seedExtraWords: wizard_data['seed_extra_words']
+                    })
+                    dialog.accepted.connect(function () {
+                        // select matching script type button and set derivation path
+                        for (var i = 0; i < scripttypegroup.buttons.length; i++) {
+                            var btn = scripttypegroup.buttons[i]
+                            if (btn.visible && btn.scripttype == dialog.scriptType) {
+                                btn.checked = true
+                                derivationpathtext.text = dialog.derivationPath
+                                return
+                            }
+                        }
+                    })
+                    dialog.open()
+                }
+            }
+        }
+
     }
 
     Bitcoin {

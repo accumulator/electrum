@@ -14,7 +14,7 @@ WizardComponent {
         wizard_data['autoconnect'] = !config_server.checked || !config_advanced.checked
     }
 
-    ColumnLayout {
+    content: ColumnLayout {
         width: parent.width
 
         Image {

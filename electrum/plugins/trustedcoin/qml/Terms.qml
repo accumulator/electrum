@@ -14,7 +14,7 @@ WizardComponent {
     property QtObject plugin
     property bool tosShown: false
 
-    ColumnLayout {
+    content: ColumnLayout {
         anchors.fill: parent
 
         Label {

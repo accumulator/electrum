@@ -13,7 +13,7 @@ WizardComponent {
         wizard_data['encrypt'] = password1.text != ''
     }
 
-    ColumnLayout {
+    content: ColumnLayout {
         anchors.fill: parent
 
         Label {

@@ -15,7 +15,7 @@ WizardComponent {
         id: keystoregroup
     }
 
-    ColumnLayout {
+    content: ColumnLayout {
         width: parent.width
 
         Label {
