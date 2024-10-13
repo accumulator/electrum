@@ -1,5 +1,7 @@
 package org.electrum.qr;
 
+import java.util.Arrays;
+
 import android.app.Activity;
 import android.os.Bundle;
 import android.util.Log;
@@ -18,20 +20,29 @@ import android.widget.Toast;
 
 import androidx.core.app.ActivityCompat;
 
-import java.util.Arrays;
 
-import me.dm7.barcodescanner.zxing.ZXingScannerView;
+import com.journeyapps.barcodescanner.CaptureManager;
+import com.journeyapps.barcodescanner.DecoratedBarcodeView;
+import com.journeyapps.barcodescanner.ViewfinderView;
+
+// import me.dm7.barcodescanner.zxing.ZXingScannerView;
 
 import com.google.zxing.Result;
 import com.google.zxing.BarcodeFormat;
 
 import org.electrum.electrum.res.R; // package set in build.gradle
 
-public class SimpleScannerActivity extends Activity implements ZXingScannerView.ResultHandler {
+// public class SimpleScannerActivity extends Activity implements ZXingScannerView.ResultHandler {
+public class SimpleScannerActivity extends Activity {
     private static final int MY_PERMISSIONS_CAMERA = 1002;
 
-    private ZXingScannerView mScannerView = null;
+//     private ZXingScannerView mScannerView = null;
     final String TAG = "org.electrum.SimpleScannerActivity";
+
+    private CaptureManager capture;
+    private DecoratedBarcodeView barcodeScannerView;
+    private Button switchFlashlightButton;
+    private ViewfinderView viewfinderView;
 
     private boolean mAlreadyRequestedPermissions = false;
 
@@ -39,6 +50,9 @@ public class SimpleScannerActivity extends Activity implements ZXingScannerView.
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.scanner_layout);
+
+        barcodeScannerView = findViewById(R.id.zxing_barcode_scanner);
+//         barcodeScannerView.setTorchListener(this);
 
         // change top text
         Intent intent = getIntent();
@@ -68,37 +82,50 @@ public class SimpleScannerActivity extends Activity implements ZXingScannerView.
                 }
             }
         });
+
+        capture = new CaptureManager(this, barcodeScannerView);
+        capture.initializeFromIntent(getIntent(), savedInstanceState);
+        capture.setShowMissingCameraPermissionDialog(false);
+        capture.decode();
+
     }
 
     @Override
     public void onResume() {
         super.onResume();
-        if (this.hasPermission()) {
-            this.startCamera();
-        } else if (!mAlreadyRequestedPermissions) {
-            mAlreadyRequestedPermissions = true;
-            this.requestPermission();
-        }
+        capture.onResume();
+//         if (this.hasPermission()) {
+//             this.startCamera();
+//         } else if (!mAlreadyRequestedPermissions) {
+//             mAlreadyRequestedPermissions = true;
+//             this.requestPermission();
+//         }
     }
 
     @Override
     public void onPause() {
         super.onPause();
-        if (null != mScannerView) {
-            mScannerView.stopCamera();           // Stop camera on pause
-        }
+        capture.onPause();
+//         if (null != mScannerView) {
+//             mScannerView.stopCamera();           // Stop camera on pause
+//         }
     }
 
-    private void startCamera() {
-        mScannerView = new ZXingScannerView(this);
-        mScannerView.setFormats(Arrays.asList(BarcodeFormat.QR_CODE));
-        ViewGroup contentFrame = (ViewGroup) findViewById(R.id.content_frame);
-        contentFrame.addView(mScannerView);
-        mScannerView.setResultHandler(this);         // Register ourselves as a handler for scan results.
-        mScannerView.startCamera();                  // Start camera on resume
+    public void onDestroy() {
+        super.onDestroy();
+        capture.onDestroy();
     }
 
-    @Override
+//     private void startCamera() {
+//         mScannerView = new ZXingScannerView(this);
+//         mScannerView.setFormats(Arrays.asList(BarcodeFormat.QR_CODE));
+//         ViewGroup contentFrame = (ViewGroup) findViewById(R.id.content_frame);
+//         contentFrame.addView(mScannerView);
+//         mScannerView.setResultHandler(this);         // Register ourselves as a handler for scan results.
+//         mScannerView.startCamera();                  // Start camera on resume
+//     }
+
+//     @Override
     public void handleResult(Result rawResult) {
         //resultIntent.putExtra("format", rawResult.getBarcodeFormat().toString());
         this.setResultAndClose(rawResult.getText());
@@ -124,21 +151,21 @@ public class SimpleScannerActivity extends Activity implements ZXingScannerView.
     }
 
     @Override
-    public void onRequestPermissionsResult(int requestCode,
-            String permissions[], int[] grantResults) {
-        switch (requestCode) {
-            case MY_PERMISSIONS_CAMERA: {
-                if (grantResults.length > 0
-                    && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                    // permission was granted, yay!
-                    this.startCamera();
-                } else {
-                    // permission denied
-                    //this.finish();
-                }
-                return;
-            }
-        }
+    public void onRequestPermissionsResult(int requestCode, String permissions[], int[] grantResults) {
+        capture.onRequestPermissionsResult(requestCode, permissions, grantResults);
+//         switch (requestCode) {
+//             case MY_PERMISSIONS_CAMERA: {
+//                 if (grantResults.length > 0
+//                     && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+//                     // permission was granted, yay!
+//                     this.startCamera();
+//                 } else {
+//                     // permission denied
+//                     //this.finish();
+//                 }
+//                 return;
+//             }
+//         }
     }
 
 }
