@@ -5,6 +5,8 @@ from electrum.interface import ServerAddr
 from electrum.network import NetworkParameters
 from electrum.plugin import Plugins
 from electrum.wizard import ServerConnectWizard, NewWalletWizard
+from electrum.daemon import Daemon
+
 from tests import ElectrumTestCase
 
 
@@ -158,7 +160,8 @@ class WalletWizardTestCase(WizardTestCase):
         wallet_path = os.path.join(w._daemon.config.get_datadir_wallet_path(), d['wallet_name'])
         w.create_storage(wallet_path, d)
 
-        self.assertTrue(os.path.exists(wallet_path))
+        wallet = Daemon._load_wallet(wallet_path, None, config=self.config)
+        self.assertIsNotNone(wallet)
 
     async def test_create_standard_wallet_haveseed_electrum(self):
         w = self.wizard_for(name='test_standard_wallet', wallet_type='standard')
@@ -182,7 +185,8 @@ class WalletWizardTestCase(WizardTestCase):
         wallet_path = os.path.join(w._daemon.config.get_datadir_wallet_path(), d['wallet_name'])
         w.create_storage(wallet_path, d)
 
-        self.assertTrue(os.path.exists(wallet_path))
+        wallet = Daemon._load_wallet(wallet_path, None, config=self.config)
+        self.assertIsNotNone(wallet)
 
     async def test_create_standard_wallet_haveseed_bip39(self):
         w = self.wizard_for(name='test_standard_wallet', wallet_type='standard')
@@ -199,7 +203,7 @@ class WalletWizardTestCase(WizardTestCase):
         v = w.resolve_next(v.view, d)
         self.assertEqual('script_and_derivation', v.view)
 
-        d.update({'script_type': 'p2wsh', 'derivation_path': 'm'})
+        d.update({'script_type': 'p2wpkh', 'derivation_path': 'm'})
         v = w.resolve_next(v.view, d)
         self.assertEqual('wallet_password', v.view)
 
@@ -210,10 +214,10 @@ class WalletWizardTestCase(WizardTestCase):
         wallet_path = os.path.join(w._daemon.config.get_datadir_wallet_path(), d['wallet_name'])
         w.create_storage(wallet_path, d)
 
-        self.assertTrue(os.path.exists(wallet_path))
+        wallet = Daemon._load_wallet(wallet_path, None, config=self.config)
+        self.assertIsNotNone(wallet)
 
     async def test_2fa(self):
-        self.assertTrue(self.config.get('enable_plugin_trustedcoin'))
         w = self.wizard_for(name='test_2fa_wallet', wallet_type='2fa')
         v = w._current
         d = v.wizard_data
@@ -246,4 +250,5 @@ class WalletWizardTestCase(WizardTestCase):
         wallet_path = os.path.join(w._daemon.config.get_datadir_wallet_path(), d['wallet_name'])
         w.create_storage(wallet_path, d)
 
-        self.assertTrue(os.path.exists(wallet_path))
+        wallet = Daemon._load_wallet(wallet_path, None, config=self.config)
+        self.assertIsNotNone(wallet)
