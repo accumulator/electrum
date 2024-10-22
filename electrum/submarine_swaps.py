@@ -1282,7 +1282,6 @@ class HttpTransport(Logger):
         self.sm.update_pairs(pairs)
 
 
-
 class NostrTransport(Logger):
     # uses nostr:
     #  - to advertise servers
@@ -1351,6 +1350,7 @@ class NostrTransport(Logger):
         self.sm.is_initialized.clear()
         await self.taskgroup.cancel_remaining()
         await self.relay_manager.close()
+        self.logger.info("nostr transport shut down")
 
     @property
     def relays(self):

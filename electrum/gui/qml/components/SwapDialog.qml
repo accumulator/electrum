@@ -249,6 +249,20 @@ ElDialog {
             }
         }
 
+        FlatButton {
+            text: 'select'
+            onClicked: {
+                var dialog = app.nostrSwapServersDialog.createObject(app, {
+                    swaphelper: _swaphelper,
+                    selectedPubkey: Config.swapServerNPub
+                })
+                dialog.accepted.connect(function() {
+                    Config.swapServerNPub = dialog.selectedPubkey
+                })
+                dialog.open()
+            }
+        }
+
         Item { Layout.fillHeight: true; Layout.preferredWidth: 1 }
 
         ButtonContainer {
