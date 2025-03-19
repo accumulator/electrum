@@ -1943,10 +1943,10 @@ class LNWallet(LNWorker):
             self, *,
             paysession: PaySession,
             amount_msat: int,        # part of payment amount we want routes for now
-            fwd_trampoline_onion: OnionPacket = None,
-            full_path: LNPaymentPath = None,
-            channels: Optional[Sequence[Channel]] = None,
             budget: PaymentFeeBudget,
+            fwd_trampoline_onion: Optional[OnionPacket] = None,
+            full_path: Optional[LNPaymentPath] = None,
+            channels: Optional[Sequence[Channel]] = None,
     ) -> AsyncGenerator[Tuple[SentHtlcInfo, int, Optional[OnionPacket]], None]:
 
         """Creates multiple routes for splitting a payment over the available
@@ -1954,7 +1954,6 @@ class LNWallet(LNWorker):
 
         We first try to conduct the payment over a single channel. If that fails
         and mpp is supported by the receiver, we will split the payment."""
-        trampoline_features = LnFeatures.VAR_ONION_OPT
         local_height = self.wallet.adb.get_local_height()
         fee_related_error = None  # type: Optional[FeeBudgetExceeded]
         if channels:
@@ -1971,7 +1970,6 @@ class LNWallet(LNWorker):
             paysession=paysession
         )
         for sc in split_configurations:
-            is_multichan_mpp = len(sc.config.items()) > 1
             is_mpp = sc.config.number_parts() > 1
             if is_mpp and not paysession.invoice_features.supports(LnFeatures.BASIC_MPP_OPT):
                 continue
@@ -1980,92 +1978,13 @@ class LNWallet(LNWorker):
             if is_mpp and self.config.TEST_FORCE_DISABLE_MPP:
                 continue
             self.logger.info(f"trying split configuration: {sc.config.values()} rating: {sc.rating}")
-            routes = []
             try:
                 if self.uses_trampoline():
-                    per_trampoline_channel_amounts = defaultdict(list)
-                    # categorize by trampoline nodes for trampoline mpp construction
-                    for (chan_id, _), part_amounts_msat in sc.config.items():
-                        chan = self.channels[chan_id]
-                        for part_amount_msat in part_amounts_msat:
-                            per_trampoline_channel_amounts[chan.node_id].append((chan_id, part_amount_msat))
-                    # for each trampoline forwarder, construct mpp trampoline
-                    for trampoline_node_id, trampoline_parts in per_trampoline_channel_amounts.items():
-                        per_trampoline_amount = sum([x[1] for x in trampoline_parts])
-                        trampoline_route, trampoline_onion, per_trampoline_amount_with_fees, per_trampoline_cltv_delta = create_trampoline_route_and_onion(
-                            amount_msat=per_trampoline_amount,
-                            paysession=paysession,
-                            my_pubkey=self.node_keypair.pubkey,
-                            node_id=trampoline_node_id,
-                            local_height=local_height,
-                            budget=budget._replace(fee_msat=budget.fee_msat // len(per_trampoline_channel_amounts)),
-                        )
-                        # node_features is only used to determine is_tlv
-                        per_trampoline_secret = os.urandom(32)
-                        per_trampoline_fees = per_trampoline_amount_with_fees - per_trampoline_amount
-                        self.logger.info(f'created route with trampoline fee level={paysession.trampoline_fee_level}')
-                        self.logger.info(f'trampoline hops: {[hop.end_node.hex() for hop in trampoline_route]}')
-                        self.logger.info(f'per trampoline fees: {per_trampoline_fees}')
-                        for chan_id, part_amount_msat in trampoline_parts:
-                            chan = self.channels[chan_id]
-                            margin = chan.available_to_spend(LOCAL, strict=True) - part_amount_msat
-                            delta_fee = min(per_trampoline_fees, margin)
-                            # TODO: distribute trampoline fee over several channels?
-                            part_amount_msat_with_fees = part_amount_msat + delta_fee
-                            per_trampoline_fees -= delta_fee
-                            route = [
-                                RouteEdge(
-                                    start_node=self.node_keypair.pubkey,
-                                    end_node=trampoline_node_id,
-                                    short_channel_id=chan.short_channel_id,
-                                    fee_base_msat=0,
-                                    fee_proportional_millionths=0,
-                                    cltv_delta=0,
-                                    node_features=trampoline_features)
-                            ]
-                            self.logger.info(f'adding route {part_amount_msat} {delta_fee} {margin}')
-                            shi = SentHtlcInfo(
-                                route=route,
-                                payment_secret_orig=paysession.payment_secret,
-                                payment_secret_bucket=per_trampoline_secret,
-                                amount_msat=part_amount_msat_with_fees,
-                                bucket_msat=per_trampoline_amount_with_fees,
-                                amount_receiver_msat=part_amount_msat,
-                                trampoline_fee_level=paysession.trampoline_fee_level,
-                                trampoline_route=trampoline_route,
-                            )
-                            routes.append((shi, per_trampoline_cltv_delta, trampoline_onion))
-                        if per_trampoline_fees != 0:
-                            e = 'not enough margin to pay trampoline fee'
-                            self.logger.info(e)
-                            raise FeeBudgetExceeded(e)
+                    routes = await self._create_routes_for_split_config_payment_trampoline(
+                        sc, paysession, budget, local_height)
                 else:
-                    # We atomically loop through a split configuration. If there was
-                    # a failure to find a path for a single part, we try the next configuration
-                    for (chan_id, _), part_amounts_msat in sc.config.items():
-                        for part_amount_msat in part_amounts_msat:
-                            channel = self.channels[chan_id]
-                            route = await run_in_thread(
-                                partial(
-                                    self.create_route_for_single_htlc,
-                                    amount_msat=part_amount_msat,
-                                    paysession=paysession,
-                                    my_sending_channels=[channel] if is_multichan_mpp else my_active_channels,
-                                    full_path=full_path,
-                                    budget=budget._replace(fee_msat=budget.fee_msat // sc.config.number_parts()),
-                                )
-                            )
-                            shi = SentHtlcInfo(
-                                route=route,
-                                payment_secret_orig=paysession.payment_secret,
-                                payment_secret_bucket=paysession.payment_secret,
-                                amount_msat=part_amount_msat,
-                                bucket_msat=paysession.amount_to_pay,
-                                amount_receiver_msat=part_amount_msat,
-                                trampoline_fee_level=None,
-                                trampoline_route=None,
-                            )
-                            routes.append((shi, paysession.min_final_cltv_delta, fwd_trampoline_onion))
+                    routes = await self._create_routes_for_split_config_payment(
+                        sc, paysession, budget, my_active_channels, full_path, fwd_trampoline_onion)
             except NoPathFound:
                 continue
             except FeeBudgetExceeded as e:
@@ -2078,14 +1997,123 @@ class LNWallet(LNWorker):
             raise fee_related_error
         raise NoPathFound()
 
+    async def _create_routes_for_split_config_payment(
+            self,
+            sc: SplitConfigRating,
+            paysession: PaySession,
+            budget: PaymentFeeBudget,
+            my_active_channels: Optional[Sequence[Channel]] = None,
+            full_path: Optional[LNPaymentPath] = None,
+            fwd_trampoline_onion: Optional[OnionPacket] = None
+    ) -> Sequence[Tuple[SentHtlcInfo, int, Optional[OnionPacket]]]:
+        routes = []
+        is_multichan_mpp = len(sc.config.items()) > 1
+
+        # We atomically loop through a split configuration. If there was
+        # a failure to find a path for a single part, we try the next configuration
+        for (chan_id, _), part_amounts_msat in sc.config.items():
+            for part_amount_msat in part_amounts_msat:
+                channel = self.channels[chan_id]
+                route = await run_in_thread(
+                    partial(
+                        self.create_route_for_single_htlc,
+                        amount_msat=part_amount_msat,
+                        paysession=paysession,
+                        my_sending_channels=[channel] if is_multichan_mpp else my_active_channels,
+                        full_path=full_path,
+                        budget=budget._replace(fee_msat=budget.fee_msat // sc.config.number_parts()),
+                    )
+                )
+                shi = SentHtlcInfo(
+                    route=route,
+                    payment_secret_orig=paysession.payment_secret,
+                    payment_secret_bucket=paysession.payment_secret,
+                    amount_msat=part_amount_msat,
+                    bucket_msat=paysession.amount_to_pay,
+                    amount_receiver_msat=part_amount_msat,
+                    trampoline_fee_level=None,
+                    trampoline_route=None,
+                )
+                routes.append((shi, paysession.min_final_cltv_delta, fwd_trampoline_onion))
+
+        return routes
+
+    async def _create_routes_for_split_config_payment_trampoline(
+            self,
+            sc: SplitConfigRating,
+            paysession: PaySession,
+            budget: PaymentFeeBudget,
+            local_height: int
+    ) -> Sequence[Tuple[SentHtlcInfo, int, Optional[OnionPacket]]]:
+        trampoline_features = LnFeatures.VAR_ONION_OPT
+        routes = []
+        per_trampoline_channel_amounts = defaultdict(list)
+        # categorize by trampoline nodes for trampoline mpp construction
+        for (chan_id, _), part_amounts_msat in sc.config.items():
+            chan = self.channels[chan_id]
+            for part_amount_msat in part_amounts_msat:
+                per_trampoline_channel_amounts[chan.node_id].append((chan_id, part_amount_msat))
+        # for each trampoline forwarder, construct mpp trampoline
+        for trampoline_node_id, trampoline_parts in per_trampoline_channel_amounts.items():
+            per_trampoline_amount = sum([x[1] for x in trampoline_parts])
+            trampoline_route, trampoline_onion, per_trampoline_amount_with_fees, per_trampoline_cltv_delta = create_trampoline_route_and_onion(
+                amount_msat=per_trampoline_amount,
+                paysession=paysession,
+                my_pubkey=self.node_keypair.pubkey,
+                node_id=trampoline_node_id,
+                local_height=local_height,
+                budget=budget._replace(fee_msat=budget.fee_msat // len(per_trampoline_channel_amounts)),
+            )
+            # node_features is only used to determine is_tlv
+            per_trampoline_secret = os.urandom(32)
+            per_trampoline_fees = per_trampoline_amount_with_fees - per_trampoline_amount
+            self.logger.info(f'created route with trampoline fee level={paysession.trampoline_fee_level}')
+            self.logger.info(f'trampoline hops: {[hop.end_node.hex() for hop in trampoline_route]}')
+            self.logger.info(f'per trampoline fees: {per_trampoline_fees}')
+            for chan_id, part_amount_msat in trampoline_parts:
+                chan = self.channels[chan_id]
+                margin = chan.available_to_spend(LOCAL, strict=True) - part_amount_msat
+                delta_fee = min(per_trampoline_fees, margin)
+                # TODO: distribute trampoline fee over several channels?
+                part_amount_msat_with_fees = part_amount_msat + delta_fee
+                per_trampoline_fees -= delta_fee
+                route = [
+                    RouteEdge(
+                        start_node=self.node_keypair.pubkey,
+                        end_node=trampoline_node_id,
+                        short_channel_id=chan.short_channel_id,
+                        fee_base_msat=0,
+                        fee_proportional_millionths=0,
+                        cltv_delta=0,
+                        node_features=trampoline_features)
+                ]
+                self.logger.info(f'adding route {part_amount_msat} {delta_fee} {margin}')
+                shi = SentHtlcInfo(
+                    route=route,
+                    payment_secret_orig=paysession.payment_secret,
+                    payment_secret_bucket=per_trampoline_secret,
+                    amount_msat=part_amount_msat_with_fees,
+                    bucket_msat=per_trampoline_amount_with_fees,
+                    amount_receiver_msat=part_amount_msat,
+                    trampoline_fee_level=paysession.trampoline_fee_level,
+                    trampoline_route=trampoline_route,
+                )
+                routes.append((shi, per_trampoline_cltv_delta, trampoline_onion))
+            if per_trampoline_fees != 0:
+                e = 'not enough margin to pay trampoline fee'
+                self.logger.info(e)
+                raise FeeBudgetExceeded(e)
+
+        return routes
+
     @profiler
     def create_route_for_single_htlc(
             self, *,
             amount_msat: int,  # that final receiver gets
             paysession: PaySession,
             my_sending_channels: List[Channel],
-            full_path: Optional[LNPaymentPath],
             budget: PaymentFeeBudget,
+            full_path: Optional[LNPaymentPath] = None,
     ) -> LNPaymentRoute:
 
         my_sending_aliases = set(chan.get_local_scid_alias() for chan in my_sending_channels)
