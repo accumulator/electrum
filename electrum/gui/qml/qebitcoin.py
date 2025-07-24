@@ -7,11 +7,14 @@ from electrum import keystore
 from electrum.i18n import _
 from electrum.bip32 import is_bip32_derivation, xpub_type
 from electrum.logging import get_logger
+from electrum.seedqr import seed_from_seedqr
 from electrum.util import get_asyncio_loop
 from electrum.transaction import tx_from_any
 from electrum.mnemonic import Mnemonic
 from electrum.old_mnemonic import wordlist as old_wordlist
 from electrum.bitcoin import is_address
+
+from electrum.gui.qml.qetypes import QEBytes
 
 
 class QEBitcoin(QObject):
@@ -125,3 +128,14 @@ class QEBitcoin(QObject):
         if not self._words:
             self._words = set(Mnemonic('en').wordlist).union(set(old_wordlist))
         return sorted(filter(lambda x: x.startswith(fragment), self._words))
+
+    @pyqtSlot(str, result='QString')
+    @pyqtSlot(QEBytes, result='QString')
+    def parseSeedQR(self, data):
+        if isinstance(data, QEBytes):
+            data = data.data
+        try:
+            return seed_from_seedqr(data)
+        except Exception as e:
+            self._logger.info(f'could not parse SeedQR')
+            return ''

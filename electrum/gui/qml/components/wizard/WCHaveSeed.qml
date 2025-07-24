@@ -182,6 +182,10 @@ WizardComponent {
                     checkIsLast()
                     checkValid()
                 }
+
+                function selectValue(value) {
+                    currentIndex = indexOfValue(value)
+                }
             }
 
             InfoTextArea {
@@ -197,7 +201,7 @@ WizardComponent {
                 Layout.columnSpan: 2
 
                 placeholderText: cosigner ? qsTr('Enter cosigner seed') : qsTr('Enter your seed')
-
+                canScan: true
                 indicatorValid: root._seedValid
                     ? root._seedType == 'bip39' && root._validationMessage
                         ? false
@@ -208,6 +212,9 @@ WizardComponent {
                         : root._seedType
                 onTextChanged: {
                     startValidationTimer()
+                }
+                onRequestSeedType: (seedtype) => {
+                    seed_variant_cb.selectValue(seedtype)
                 }
             }
         }

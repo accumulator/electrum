@@ -15,8 +15,10 @@ Pane {
     property alias placeholderText: seedtextarea.placeholderText
     property string indicatorText
     property bool indicatorValid
-
+    property bool canScan: false
     property var _suggestions: []
+
+    signal requestSeedType(seedtype: string)
 
     onTextChanged: {
         if (seedtextarea.text != text)
@@ -32,52 +34,89 @@ Pane {
         width: parent.width
         spacing: 0
 
-        TextArea {
-            id: seedtextarea
+        RowLayout {
             Layout.fillWidth: true
-            Layout.minimumHeight: fontMetrics.height * 3 + topPadding + bottomPadding
+            spacing: 0
+            TextArea {
+                id: seedtextarea
+                Layout.fillWidth: true
+                Layout.minimumHeight: fontMetrics.height * 3 + topPadding + bottomPadding
 
-            rightPadding: constants.paddingLarge
-            leftPadding: constants.paddingLarge
+                rightPadding: constants.paddingLarge
+                leftPadding: constants.paddingLarge
 
-            wrapMode: TextInput.WordWrap
-            font.bold: true
-            font.pixelSize: constants.fontSizeLarge
-            font.family: FixedFont
-            inputMethodHints: Qt.ImhSensitiveData | Qt.ImhLowercaseOnly | Qt.ImhNoPredictiveText
-            readOnly: AppController.isAndroid()
+                wrapMode: TextInput.WordWrap
+                font.bold: true
+                font.pixelSize: constants.fontSizeLarge
+                font.family: FixedFont
+                inputMethodHints: Qt.ImhSensitiveData | Qt.ImhLowercaseOnly | Qt.ImhNoPredictiveText
+                readOnly: AppController.isAndroid()
 
-            background: Rectangle {
-                color: constants.darkerBackground
+                background: Rectangle {
+                    color: constants.darkerBackground
+                }
+
+                onTextChanged: {
+                    // work around Qt issue, TextArea fires spurious textChanged events
+                    // NOTE: might be Qt virtual keyboard, or Qt upgrade from 5.15.2 to 5.15.7
+                    if (root.text != text)
+                        root.text = text
+
+                    // update suggestions
+                    _suggestions = bitcoin.mnemonicsFor(seedtextarea.text.split(' ').pop())
+                    // TODO: cursorPosition only on suggestion apply
+                    cursorPosition = text.length
+                }
+
+                Rectangle {
+                    anchors.fill: contentText
+                    color: root.indicatorValid ? 'green' : 'red'
+                    border.color: Material.accentColor
+                    radius: 2
+                }
+                Label {
+                    id: contentText
+                    text: root.indicatorText
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    leftPadding: root.indicatorText != '' ? constants.paddingLarge : 0
+                    rightPadding: root.indicatorText != '' ? constants.paddingLarge : 0
+                    font.bold: false
+                    font.pixelSize: constants.fontSizeSmall
+                }
             }
+            ColumnLayout {
+                Layout.alignment: Qt.AlignTop
+                Layout.margins: 0
+                visible: canScan
+                ToolButton {
+                    icon.source: '../../../icons/qrcode.png'
+                    icon.height: constants.iconSizeMedium
+                    icon.width: constants.iconSizeMedium
 
-            onTextChanged: {
-                // work around Qt issue, TextArea fires spurious textChanged events
-                // NOTE: might be Qt virtual keyboard, or Qt upgrade from 5.15.2 to 5.15.7
-                if (root.text != text)
-                    root.text = text
-
-                // update suggestions
-                _suggestions = bitcoin.mnemonicsFor(seedtextarea.text.split(' ').pop())
-                // TODO: cursorPosition only on suggestion apply
-                cursorPosition = text.length
-            }
-
-            Rectangle {
-                anchors.fill: contentText
-                color: root.indicatorValid ? 'green' : 'red'
-                border.color: Material.accentColor
-                radius: 2
-            }
-            Label {
-                id: contentText
-                text: root.indicatorText
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                leftPadding: root.indicatorText != '' ? constants.paddingLarge : 0
-                rightPadding: root.indicatorText != '' ? constants.paddingLarge : 0
-                font.bold: false
-                font.pixelSize: constants.fontSizeSmall
+                    function takeSeed(seed) {
+                        requestSeedType('bip39')
+                        seedtext.text = seed
+                    }
+                    onClicked: {
+                        var dialog = app.scanDialog.createObject(app, {
+                            hint: qsTr('Scan a seedQR')
+                        })
+                        dialog.onFoundText.connect(function(data) {
+                            var seed = bitcoin.parseSeedQR(data)
+                            if (seed)
+                                takeSeed(seed)
+                            dialog.close()
+                        })
+                        dialog.onFoundBinary.connect(function(data) {
+                            var seed = bitcoin.parseSeedQR(data)
+                            if (seed)
+                                takeSeed(seed)
+                            dialog.close()
+                        })
+                        dialog.open()
+                    }
+                }
             }
         }
 
