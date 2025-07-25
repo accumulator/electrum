@@ -1001,14 +1001,20 @@ class TxDialog(QDialog, MessageBoxMixin):
             self.ln_amount_label.setText(ln_amount_str)
         else:
             self.ln_amount_label.hide()
-        show_psbt_only_widgets = isinstance(self.tx, PartialTransaction)
+
+        show_psbt_only_widgets = isinstance(self.tx, PartialTransaction) and not self.tx.contains_silent_payment()
         for widget in self.psbt_only_widgets:
             if isinstance(widget, QMenu):
                 widget.menuAction().setVisible(show_psbt_only_widgets)
             else:
                 widget.setVisible(show_psbt_only_widgets)
+
         if tx_details.is_lightning_funding_tx:
             self._ptx_join_txs_action.setEnabled(False)  # would change txid
+
+        # disable sharing for unsigned silent-payments
+        if self.tx.contains_silent_payment():
+            self.export_actions_button.setVisible(self.tx.is_complete())
 
         self.save_button.setEnabled(tx_details.can_save_as_local)
         if tx_details.can_save_as_local:
