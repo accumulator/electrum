@@ -33,6 +33,7 @@ import time
 import threading
 import sys
 import zipfile as zipfile_lib
+from enum import Enum
 from urllib.parse import urlparse
 
 from typing import (NamedTuple, Any, Union, TYPE_CHECKING, Optional, Tuple,
@@ -59,7 +60,6 @@ if TYPE_CHECKING:
     from .hw_wallet import HW_PluginBase, HardwareClientBase, HardwareHandlerBase
     from .keystore import Hardware_KeyStore, KeyStore
     from .wallet import Abstract_Wallet
-
 
 _logger = get_logger(__name__)
 plugin_loaders = {}
@@ -1083,6 +1083,20 @@ class HardwarePluginLibraryUnavailable(Exception): pass
 class CannotAutoSelectDevice(Exception): pass
 
 
+class DeviceTransport(Enum):
+    # the device's link, and what the device exposes on it:
+    USB_HID = 'usb_hid'        # HID interface (hidapi)
+    USB_VENDOR = 'usb_vendor'  # vendor-specific interface (libusb), called WebUSB by trezorlib, keepkeylib and safetlib
+    USB_SERIAL = 'usb_serial'  # serial port, CDC-ACM or a USB-UART chip (pyserial)
+    BLE = 'ble'                # Bluetooth LE, a vendor GATT service with a write and a notify characteristic
+    BRIDGE = 'bridge'          # Trezor Bridge (trezord), which holds the USB device
+    UDP = 'udp'                # emulator (trezor)
+    TCP = 'tcp'                # simulator (jade)
+    SOCKET = 'socket'          # simulator (coldcard)
+    # NFC = 'nfc'              # NFC, ISO-DEP (ISO 14443-4) APDUs to a smartcard (Android)
+    # PCSC = 'pcsc'            # PC/SC, which holds the smartcard reader; the card on contact or NFC
+
+
 class Device(NamedTuple):
     path: Union[str, bytes]
     interface_number: int
@@ -1090,11 +1104,14 @@ class Device(NamedTuple):
     product_key: Any   # when using hid, often Tuple[int, int]
     usage_page: int
     transport_ui_string: str
+    product_name: Optional[str] = None  # USB product name, used for matching hww subtypes (e.g. bitbox02)
+    serial_number: Optional[str] = None  # USB serial number, if the enumeration provides it
+    transport: Optional[DeviceTransport] = None
 
 
 class DeviceInfo(NamedTuple):
     device: Device
-    label: Optional[str] = None
+    label: Optional[str] = None  # name given to device by user
     initialized: Optional[bool] = None
     exception: Optional[Exception] = None
     plugin_name: Optional[str] = None  # manufacturer, e.g. "trezor"

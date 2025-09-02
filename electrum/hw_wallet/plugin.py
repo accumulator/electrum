@@ -23,10 +23,11 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 from abc import abstractmethod, ABC
-from typing import TYPE_CHECKING, Sequence, Optional, Type, Iterable, Any
+from typing import TYPE_CHECKING, Sequence, Optional, Type, Iterable, Any, Callable
 
-from electrum.plugin import (BasePlugin, hook, Device, DeviceMgr,
-                             assert_runs_in_hwd_thread, runs_in_hwd_thread)
+from electrum.plugin import (
+    BasePlugin, hook, Device, DeviceMgr, assert_runs_in_hwd_thread, runs_in_hwd_thread, DeviceTransport
+)
 from electrum.i18n import _
 from electrum.bitcoin import is_address, opcodes
 from electrum.util import versiontuple, UserFacingException, ChoiceItem
@@ -74,12 +75,17 @@ class HW_PluginBase(BasePlugin, ABC):
         # id_=str(d['path']) in itself might be sufficient, but this had to be touched
         # a number of times already, so let's just go for the overkill approach:
         id_ = f"{d['path']},{d['serial_number']},{interface_number},{usage_page}"
-        device = Device(path=d['path'],
-                        interface_number=interface_number,
-                        id_=id_,
-                        product_key=product_key,
-                        usage_page=usage_page,
-                        transport_ui_string='hid')
+        device = Device(
+            path=d['path'],
+            interface_number=interface_number,
+            id_=id_,
+            product_key=product_key,
+            usage_page=usage_page,
+            transport_ui_string='hid',
+            product_name=d.get('product_string'),
+            serial_number=d['serial_number'],
+            transport=DeviceTransport.USB_HID,
+        )
         return device
 
     @hook
