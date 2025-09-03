@@ -64,10 +64,10 @@ CKCC_SIMULATED_PID = CKCC_PID ^ 0x55aa
 
 
 class CKCCClient(HardwareClientBase):
-    def __init__(self, plugin, handler, dev_path, *, is_simulator=False):
-        HardwareClientBase.__init__(self, plugin=plugin)
+    def __init__(self, plugin, handler, device: 'Device', *, is_simulator=False):
+        HardwareClientBase.__init__(self, plugin=plugin, device_descriptor=device, handler=handler)
+        dev_path = device.path
         self.device = plugin.device
-        self.handler = handler
 
         # if we know what the (xfp, xpub) "should be" then track it here
         self._expected_device = None
@@ -533,13 +533,13 @@ class ColdcardPlugin(HW_PluginBase):
         return []
 
     @runs_in_hwd_thread
-    def create_client(self, device, handler):
+    def create_client(self, device_descriptor: 'Device', handler):
         # We are given a HID device, or at least some details about it.
         # Not sure why not we aren't just given a HID library handle, but
         # the 'path' is unabiguous, so we'll use that.
         try:
-            rv = CKCCClient(self, handler, device.path,
-                            is_simulator=(device.product_key[1] == CKCC_SIMULATED_PID))
+            rv = CKCCClient(self, handler, device_descriptor,
+                            is_simulator=(device_descriptor.product_key[1] == CKCC_SIMULATED_PID))
             return rv
         except Exception as e:
             self.logger.exception('late failure connecting to device?')

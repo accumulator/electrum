@@ -177,7 +177,7 @@ class HW_PluginBase(BasePlugin, ABC):
     def is_outdated_fw_ignored(self) -> bool:
         return self._ignore_outdated_fw
 
-    def create_client(self, device: 'Device',
+    def create_client(self, device_descriptor: 'Device',
                       handler: Optional['HardwareHandlerBase']) -> Optional['HardwareClientBase']:
         raise NotImplementedError()
 
@@ -207,11 +207,14 @@ class HW_PluginBase(BasePlugin, ABC):
 
 
 class HardwareClientBase(ABC):
-    handler = None  # type: Optional['HardwareHandlerBase']
-
-    def __init__(self, *, plugin: 'HW_PluginBase'):
+    def __init__(self, *, plugin: 'HW_PluginBase', device_descriptor: 'Device',
+                 handler: Optional['HardwareHandlerBase'] = None):
+        # note: handler is optional; during device enumeration there is no handler, and several
+        # plugins set client.handler later (see DeviceMgr.client_for_keystore).
         assert_runs_in_hwd_thread()
         self.plugin = plugin
+        self.device_descriptor = device_descriptor
+        self.handler = handler
 
     def device_manager(self) -> 'DeviceMgr':
         return self.plugin.device_manager()
@@ -290,8 +293,8 @@ class HardwareClientDummy(HardwareClientBase):
     E.g. for Ledger HW.1 devices that we used to support in the past, but no longer do.
     This allows showing an error message to the user.
     """
-    def __init__(self, *, plugin: 'HW_PluginBase', error_text: str):
-        HardwareClientBase.__init__(self, plugin=plugin)
+    def __init__(self, *, plugin: 'HW_PluginBase', device_descriptor: 'Device', error_text: str):
+        HardwareClientBase.__init__(self, plugin=plugin, device_descriptor=device_descriptor)
         self.error_text = error_text
 
     def get_xpub(self, bip32_path: str, xtype) -> str:

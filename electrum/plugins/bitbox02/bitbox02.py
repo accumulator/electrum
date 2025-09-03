@@ -15,7 +15,7 @@ from electrum.transaction import PartialTransaction, Sighash
 from electrum.wallet import Multisig_Wallet, Deterministic_Wallet
 from electrum.util import UserFacingException
 from electrum.logging import get_logger
-from electrum.plugin import Device, DeviceInfo, runs_in_hwd_thread
+from electrum.plugin import DeviceInfo, runs_in_hwd_thread, Plugins
 from electrum.simple_config import SimpleConfig
 from electrum.storage import get_derivation_used_for_hw_device_encryption
 from electrum.bitcoin import OnchainOutputType
@@ -26,6 +26,7 @@ from electrum.hw_wallet import HW_PluginBase, HardwareClientBase, HardwareHandle
 
 if TYPE_CHECKING:
     from electrum.wizard import NewWalletWizard
+    from electrum.plugin import Device
 
 _logger = get_logger(__name__)
 
@@ -71,11 +72,9 @@ class BitBox02NotPaired(UserFacingException):
 
 class BitBox02Client(HardwareClientBase):
     # handler is a BitBox02_Handler, importing it would lead to a circular dependency
-    def __init__(self, handler: HardwareHandlerBase, device: Device, config: SimpleConfig, *, plugin: HW_PluginBase):
-        HardwareClientBase.__init__(self, plugin=plugin)
+    def __init__(self, handler: HardwareHandlerBase, device_descriptor: 'Device', config: SimpleConfig, *, plugin: HW_PluginBase):
+        HardwareClientBase.__init__(self, plugin=plugin, device_descriptor=device_descriptor, handler=handler)
         self.bitbox02_device = None  # type: Optional[bitbox02.BitBox02]
-        self.handler = handler
-        self.device_descriptor = device
         self.config = config
         self.bitbox_hid_info = None
         if self.config.get("bitbox02") is None:
@@ -656,8 +655,8 @@ class BitBox02Plugin(HW_PluginBase):
             raise ImportError()
 
     @runs_in_hwd_thread
-    def create_client(self, device, handler) -> BitBox02Client:
-        return BitBox02Client(handler, device, self.config, plugin=self)
+    def create_client(self, device_descriptor: 'Device', handler) -> BitBox02Client:
+        return BitBox02Client(handler, device_descriptor, self.config, plugin=self)
 
     @runs_in_hwd_thread
     def show_address(
