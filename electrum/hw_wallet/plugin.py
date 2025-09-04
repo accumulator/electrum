@@ -72,6 +72,7 @@ class HW_PluginBase(BasePlugin, ABC):
         # Older versions of hid don't provide interface_number
         interface_number = d.get('interface_number', -1)
         usage_page = d['usage_page']
+        # NOTE: usage page not available on android during enumeration, only after device-open.
         # id_=str(d['path']) in itself might be sufficient, but this had to be touched
         # a number of times already, so let's just go for the overkill approach:
         id_ = f"{d['path']},{d['serial_number']},{interface_number},{usage_page}"
