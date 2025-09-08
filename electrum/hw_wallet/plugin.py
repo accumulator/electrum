@@ -35,10 +35,10 @@ from electrum.transaction import TxOutput, PartialTransaction
 from electrum.bip32 import BIP32Node
 from electrum.storage import get_derivation_used_for_hw_device_encryption
 from electrum.keystore import Xpub, Hardware_KeyStore
+from electrum.plugin import DeviceInfo
 
 if TYPE_CHECKING:
     import threading
-    from electrum.plugin import DeviceInfo
     from electrum.wallet import Abstract_Wallet
     from electrum.wizard import AbstractWizard
 
@@ -236,7 +236,7 @@ class HardwareClientBase(ABC):
         """True if initialized, False if wiped."""
         pass
 
-    def label(self) -> Optional[str]:
+    def label(self, *, avoid_pairing: bool = False) -> Optional[str]:
         """The name given by the user to the device.
 
         Note: labels are shown to the user to help distinguish their devices,
@@ -247,15 +247,34 @@ class HardwareClientBase(ABC):
         # it is supposed to work), make sure the return value is in electrum.plugin.PLACEHOLDER_HW_CLIENT_LABELS
         return " "
 
-    def get_soft_device_id(self) -> Optional[str]:
+    def get_soft_device_id(self, *, avoid_pairing: bool = False) -> Optional[str]:
         """An id-like string that is used to distinguish devices programmatically.
         This is a long term id for the device, that does not change between reconnects.
         This method should not prompt the user, i.e. no user interaction, as it is used
         during USB device enumeration (called for each unpaired device).
         Stored in the wallet file.
+
+        In case the device is unpaired, we return None
         """
+        if not self.is_paired():
+            return None
         root_fp = self.request_root_fingerprint_from_device()
         return root_fp
+
+    def is_paired(self):
+        return True
+
+    def get_device_info_for_enumeration(self) -> 'DeviceInfo':
+        # retrieve DeviceInfo without triggering pairing (same behaviour as handler==None)
+        device = self.device_descriptor  # TODO: generalize? bitbox02 specific? Device must always be recorded
+        return DeviceInfo(
+            device=device,
+            label=self.label() if self.is_paired() else HardwareClientBase.label(self),
+            initialized=self.is_initialized(),
+            plugin_name=self.plugin.name,
+            soft_device_id=self.get_soft_device_id() if self.is_paired() else HardwareClientBase.get_soft_device_id(self),
+            model_name=self.device_model_name()
+        )
 
     @abstractmethod
     def has_usable_connection_with_device(self) -> bool:

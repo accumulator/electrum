@@ -1451,21 +1451,15 @@ class DeviceMgr(ThreadJob):
                 client = self.create_client(device, handler, plugin)
                 if not client:
                     continue
-                label = client.label()
-                is_initialized = client.is_initialized()
-                soft_device_id = client.get_soft_device_id()
-                model_name = client.device_model_name()
+                # since we just enumerate devices here, avoid entering pairing flow. avoiding pairing is also
+                # implicitly done when handler is None, but since we cache client, it can have gained a handler,
+                # leading to pairing being triggered on second enumeration.
+                infos.append(client.get_device_info_for_enumeration())
             except Exception as e:
                 self.logger.error(f'failed to create client for {plugin.name} at {device.path}: {repr(e)}')
                 if include_failing_clients:
                     infos.append(DeviceInfo(device=device, exception=e, plugin_name=plugin.name))
                 continue
-            infos.append(DeviceInfo(device=device,
-                                    label=label,
-                                    initialized=is_initialized,
-                                    plugin_name=plugin.name,
-                                    soft_device_id=soft_device_id,
-                                    model_name=model_name))
 
         return infos
 
