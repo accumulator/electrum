@@ -228,6 +228,11 @@ class HardwareClientBase(ABC):
     def close(self):
         pass
 
+    def abort(self):  # noqa: B027
+        """abort the current operation (if any). not on hww thread, as that thread is likely blocking
+           TODO: enforce running NOT on hww thread."""
+        pass
+
     def timeout(self, cutoff) -> None:  # noqa: B027
         pass
 
