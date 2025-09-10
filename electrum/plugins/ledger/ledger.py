@@ -16,7 +16,7 @@ from electrum.crypto import hash_160
 from electrum.i18n import _
 from electrum.keystore import Hardware_KeyStore
 from electrum.logging import get_logger
-from electrum.plugin import Device, runs_in_hwd_thread
+from electrum.plugin import runs_in_hwd_thread
 from electrum.transaction import PartialTransaction, Transaction, PartialTxInput
 from electrum.util import bfh, UserFacingException, versiontuple
 from electrum.wallet import Standard_Wallet
@@ -26,7 +26,7 @@ from electrum.hw_wallet.plugin import is_any_tx_output_on_change_branch, validat
 from electrum.hw_wallet.plugin import HardwareClientDummy
 
 if TYPE_CHECKING:
-    from electrum.plugin import DeviceInfo
+    from electrum.plugin import Device, DeviceInfo
     from electrum.wizard import NewWalletWizard
 
 _logger = get_logger(__name__)
@@ -308,17 +308,17 @@ class Ledger_Client(HardwareClientBase, ABC):
 
     @staticmethod
     def construct_new(
-        *args, device: Device, plugin: 'LedgerPlugin', **kwargs,
+        *args, device_descriptor: 'Device', plugin: 'LedgerPlugin', **kwargs,
     ) -> Union['Ledger_Client', HardwareClientDummy]:
         """The 'real' constructor, that automatically decides which subclass to use."""
-        if LedgerPlugin.is_hw1(device.product_key):
+        if LedgerPlugin.is_hw1(device_descriptor.product_key):
             return HardwareClientDummy(
                 plugin=plugin,
                 error_text="ledger hw.1 devices are no longer supported",
             )
         # for nano S or newer hw, decide which client impl to use based on software/firmware version:
         hid_device = HID()
-        hid_device.path = device.path
+        hid_device.path = device_descriptor.path
         hid_device.open()
         transport = ledger_bitcoin.TransportClient('hid', hid=hid_device)
         try:
@@ -333,14 +333,14 @@ class Ledger_Client(HardwareClientBase, ABC):
             _logger.info(f"ledger_bitcoin.createClient() got exc: {e}. falling back to old plugin.")
             cl = None
         if isinstance(cl, ledger_bitcoin.client.NewClient):
-            _logger.debug(f"Ledger_Client.construct_new(). creating NewClient for {device=}.")
-            return Ledger_Client_New(hid_device, *args, plugin=plugin, **kwargs)
+            _logger.debug(f"Ledger_Client.construct_new(). creating NewClient for {device_descriptor=}.")
+            return Ledger_Client_New(device_descriptor, hid_device, *args, plugin=plugin, **kwargs)
         else:
-            _logger.debug(f"Ledger_Client.construct_new(). creating LegacyClient for {device=}.")
-            return Ledger_Client_Legacy(hid_device, *args, plugin=plugin, **kwargs)
+            _logger.debug(f"Ledger_Client.construct_new(). creating LegacyClient for {device_descriptor=}.")
+            return Ledger_Client_Legacy(device_descriptor, hid_device, *args, plugin=plugin, **kwargs)
 
-    def __init__(self, *, plugin: HW_PluginBase):
-        HardwareClientBase.__init__(self, plugin=plugin)
+    def __init__(self, *, plugin: HW_PluginBase, device_descriptor: 'Device'):
+        HardwareClientBase.__init__(self, plugin=plugin, device_descriptor=device_descriptor)
 
     def get_master_fingerprint(self) -> bytes:
         return self.request_root_fingerprint_from_device()
@@ -369,9 +369,9 @@ class Ledger_Client_Legacy(Ledger_Client):
     """Client based on the bitchip library, targeting versions 2.0.* and below."""
     is_legacy = True
 
-    def __init__(self, hidDevice: 'HID', *, product_key: Tuple[int, int],
+    def __init__(self, device_descriptor: 'Device', hidDevice: 'HID', *, product_key: Tuple[int, int],
                  plugin: HW_PluginBase):
-        Ledger_Client.__init__(self, plugin=plugin)
+        Ledger_Client.__init__(self, plugin=plugin, device_descriptor=device_descriptor)
 
         # Hack, we close the old object and instantiate a new one
         hidDevice.close()
@@ -779,9 +779,9 @@ class Ledger_Client_New(Ledger_Client):
 
     is_legacy = False
 
-    def __init__(self, hidDevice: 'HID', *, product_key: Tuple[int, int],
+    def __init__(self, device_descriptor: 'Device', hidDevice: 'HID', *, product_key: Tuple[int, int],
                  plugin: HW_PluginBase):
-        Ledger_Client.__init__(self, plugin=plugin)
+        Ledger_Client.__init__(self, plugin=plugin, device_descriptor=device_descriptor)
 
         transport = ledger_bitcoin.TransportClient('hid', hid=hidDevice)
         self.client = ledger_bitcoin.client.NewClient(transport, get_chain())
@@ -1295,15 +1295,15 @@ class LedgerPlugin(HW_PluginBase):
         # give up
         return False, None
 
-    def can_recognize_device(self, device: Device) -> bool:
-        can_recognize = self._recognize_device(device.product_key)[0]
+    def can_recognize_device(self, device_descriptor: 'Device') -> bool:
+        can_recognize = self._recognize_device(device_descriptor.product_key)[0]
         if can_recognize:
             # Do a further check, duplicated from:
             # https://github.com/LedgerHQ/ledgercomm/blob/bc5ada865980cb63c2b9b71a916e01f2f8e53716/ledgercomm/interfaces/hid_device.py#L79-L82
             # Modern ledger devices can have multiple interfaces picked up by hid, only one of which is usable by us.
             # If we try communicating with the wrong one, we might not get a reply and block forever.
-            if device.product_key[0] == 0x2c97:
-                if not (device.interface_number == 0 or device.usage_page == 0xffa0):
+            if device_descriptor.product_key[0] == 0x2c97:
+                if not (device_descriptor.interface_number == 0 or device_descriptor.usage_page == 0xffa0):
                     return False
         return can_recognize
 
@@ -1318,11 +1318,12 @@ class LedgerPlugin(HW_PluginBase):
         return device
 
     @runs_in_hwd_thread
-    def create_client(self, device, handler) -> Union[Ledger_Client, None, HardwareClientDummy]:
+    def create_client(self, device_descriptor: 'Device', handler) -> Union[Ledger_Client, None, HardwareClientDummy]:
         try:
-            return Ledger_Client.construct_new(device=device, product_key=device.product_key, plugin=self)
+            return Ledger_Client.construct_new(
+                device=device_descriptor, product_key=device_descriptor.product_key, plugin=self)
         except Exception as e:
-            self.logger.info(f"cannot connect at {device.path} {e}", exc_info=e)
+            self.logger.info(f"cannot connect at {device_descriptor.path} {e}", exc_info=e)
         return None
 
     @runs_in_hwd_thread

@@ -123,6 +123,23 @@ if TYPE_CHECKING:
 _logger = get_logger(__name__)
 
 
+# monkeypatch hid, reimpl for android
+import hid
+def electrum_enumerate(*args, **kwargs):
+    _logger.info("ELECTRUM ENUMERATE")
+    # import traceback
+    # traceback.print_stack()
+    if is_android:
+        _logger.info("ANDROID ENUMERATE")
+        return []  # TODO
+    else:
+        return _hid_enumerate(*args, **kwargs)
+
+
+_hid_enumerate = hid.enumerate
+hid.enumerate = electrum_enumerate
+
+
 # get password routine
 def prompt_password(prompt: str, *, confirm: bool = True) -> Optional[str]:
     import getpass

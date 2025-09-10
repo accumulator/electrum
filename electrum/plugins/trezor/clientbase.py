@@ -1,5 +1,6 @@
 import time
 from struct import pack
+from typing import TYPE_CHECKING
 
 import electrum_ecc as ecc
 
@@ -16,6 +17,9 @@ from trezorlib.exceptions import TrezorFailure, Cancelled, OutdatedFirmwareError
 from trezorlib.messages import WordRequestType, FailureType, ButtonRequestType
 import trezorlib.btc
 import trezorlib.device
+
+if TYPE_CHECKING:
+    from electrum.plugin import Device
 
 try:
     # trezor >= 0.13.9
@@ -49,13 +53,12 @@ MESSAGES = {
 
 
 class TrezorClientBase(HardwareClientBase, Logger):
-    def __init__(self, transport, handler, plugin):
-        HardwareClientBase.__init__(self, plugin=plugin)
+    def __init__(self, device_descriptor: 'Device', transport, handler, plugin):
+        HardwareClientBase.__init__(self, plugin=plugin, device_descriptor=device_descriptor, handler=handler)
         if plugin.is_outdated_fw_ignored():
             TrezorClient.is_outdated = lambda *args, **kwargs: False
         self.client = TrezorClient(transport, ui=self)
         self.device = plugin.device
-        self.handler = handler
         Logger.__init__(self)
 
         self.msg = None

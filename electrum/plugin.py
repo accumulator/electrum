@@ -31,6 +31,7 @@ import time
 import threading
 import sys
 import zipfile as zipfile_lib
+from enum import Enum
 from urllib.parse import urlparse
 
 from typing import (NamedTuple, Any, Union, TYPE_CHECKING, Optional, Tuple,
@@ -59,7 +60,6 @@ if TYPE_CHECKING:
     from .keystore import Hardware_KeyStore, KeyStore
     from .wallet import Abstract_Wallet
 
-
 _logger = get_logger(__name__)
 plugin_loaders = {}
 hook_names = set()
@@ -67,6 +67,9 @@ hooks = {}
 _exec_module_failure = {}  # type: Dict[str, Exception]
 
 PLUGIN_PASSWORD_VERSION = 1
+
+
+class MissingLibrariesException(Exception): pass
 
 
 class Plugins(DaemonThread):
@@ -724,7 +727,7 @@ class Plugins(DaemonThread):
                 return False
         return True
 
-    def get_hardware_support(self):
+    def get_hardware_support(self) -> Sequence['HardwarePluginToScan']:
         out = []
         for name, details in self._hw_wallets.items():
             try:
@@ -908,6 +911,13 @@ class HardwarePluginLibraryUnavailable(Exception): pass
 class CannotAutoSelectDevice(Exception): pass
 
 
+class DeviceTransport(Enum):
+    HID = 'hid'
+    TCP = 'tcp'
+    # SERIAL = 'serial'
+    # BLUETOOTH = 'bt'
+
+
 class Device(NamedTuple):
     path: Union[str, bytes]
     interface_number: int
@@ -915,11 +925,13 @@ class Device(NamedTuple):
     product_key: Any   # when using hid, often Tuple[int, int]
     usage_page: int
     transport_ui_string: str
+    product_name: str  # USB product name, used for matching hww subtypes (e.g. bitbox02)
+    transport: Optional[DeviceTransport] = None
 
 
 class DeviceInfo(NamedTuple):
     device: Device
-    label: Optional[str] = None
+    label: Optional[str] = None  # name given to device by user
     initialized: Optional[bool] = None
     exception: Optional[Exception] = None
     plugin_name: Optional[str] = None  # manufacturer, e.g. "trezor"
@@ -1245,21 +1257,15 @@ class DeviceMgr(ThreadJob):
                 client = self.create_client(device, handler, plugin)
                 if not client:
                     continue
-                label = client.label()
-                is_initialized = client.is_initialized()
-                soft_device_id = client.get_soft_device_id()
-                model_name = client.device_model_name()
+                # since we just enumerate devices here, avoid entering pairing flow. avoiding pairing is also
+                # implicitly done when handler is None, but since we cache client, it can have gained a handler,
+                # leading to pairing being triggered on second enumeration.
+                infos.append(client.get_device_info_for_enumeration())
             except Exception as e:
                 self.logger.error(f'failed to create client for {plugin.name} at {device.path}: {repr(e)}')
                 if include_failing_clients:
                     infos.append(DeviceInfo(device=device, exception=e, plugin_name=plugin.name))
                 continue
-            infos.append(DeviceInfo(device=device,
-                                    label=label,
-                                    initialized=is_initialized,
-                                    plugin_name=plugin.name,
-                                    soft_device_id=soft_device_id,
-                                    model_name=model_name))
 
         return infos
 
@@ -1336,7 +1342,8 @@ class DeviceMgr(ThreadJob):
         return info
 
     @runs_in_hwd_thread
-    def _scan_devices_with_hid(self) -> List['Device']:
+    def platform_scan_devices(self) -> List['Device']:
+        # platform specific enumerate, will be monkeypatched on android
         try:
             import hid  # noqa: F811
         except ImportError:
@@ -1362,8 +1369,7 @@ class DeviceMgr(ThreadJob):
     def scan_devices(self) -> Sequence['Device']:
         self.logger.info("scanning devices...")
 
-        # First see what's connected that we know about
-        devices = self._scan_devices_with_hid()
+        devices = self.platform_scan_devices()
 
         # Let plugin handlers enumerate devices we don't know about
         with self.lock:

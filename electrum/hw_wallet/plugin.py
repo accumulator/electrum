@@ -22,11 +22,15 @@
 # ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
+import os
 from abc import abstractmethod, ABC
-from typing import TYPE_CHECKING, Sequence, Optional, Type, Iterable, Any
+from typing import TYPE_CHECKING, Sequence, Optional, Type, Iterable, Any, Callable
 
-from electrum.plugin import (BasePlugin, hook, Device, DeviceMgr,
-                             assert_runs_in_hwd_thread, runs_in_hwd_thread)
+import hid
+
+from electrum.plugin import (
+    BasePlugin, hook, Device, DeviceMgr, assert_runs_in_hwd_thread, runs_in_hwd_thread, DeviceTransport
+)
 from electrum.i18n import _
 from electrum.bitcoin import is_address, opcodes
 from electrum.util import versiontuple, UserFacingException, ChoiceItem
@@ -34,10 +38,10 @@ from electrum.transaction import TxOutput, PartialTransaction
 from electrum.bip32 import BIP32Node
 from electrum.storage import get_derivation_used_for_hw_device_encryption
 from electrum.keystore import Xpub, Hardware_KeyStore
+from electrum.plugin import DeviceInfo
 
 if TYPE_CHECKING:
     import threading
-    from electrum.plugin import DeviceInfo
     from electrum.wallet import Abstract_Wallet
     from electrum.wizard import AbstractWizard
 
@@ -73,13 +77,19 @@ class HW_PluginBase(BasePlugin, ABC):
         usage_page = d['usage_page']
         # id_=str(d['path']) in itself might be sufficient, but this had to be touched
         # a number of times already, so let's just go for the overkill approach:
-        id_ = f"{d['path']},{d['serial_number']},{interface_number},{usage_page}"
-        device = Device(path=d['path'],
-                        interface_number=interface_number,
-                        id_=id_,
-                        product_key=product_key,
-                        usage_page=usage_page,
-                        transport_ui_string='hid')
+        # id_ = f"{d['path']},{d['serial_number']},{interface_number},{usage_page}"
+        # NOTE: usage page not available on android
+        id_ = f"{d['path']},{d['serial_number']},{interface_number}"
+        device = Device(
+            path=d['path'],
+            interface_number=interface_number,
+            id_=id_,
+            product_key=product_key,
+            usage_page=usage_page,
+            transport_ui_string='hid',
+            product_name=d.get('product_string'),
+            transport=DeviceTransport.HID,
+        )
         return device
 
     @hook
@@ -169,12 +179,11 @@ class HW_PluginBase(BasePlugin, ABC):
     def is_outdated_fw_ignored(self) -> bool:
         return self._ignore_outdated_fw
 
-    def create_client(self, device: 'Device',
+    def create_client(self, device_descriptor: 'Device',
                       handler: Optional['HardwareHandlerBase']) -> Optional['HardwareClientBase']:
         raise NotImplementedError()
 
-    def create_handler(self, window) -> 'HardwareHandlerBase':
-        # note: in Qt GUI, 'window' is either an ElectrumWindow or an QENewWalletWizard
+    def create_handler(self, *args) -> 'HardwareHandlerBase':
         raise NotImplementedError()
 
     def can_recognize_device(self, device: Device) -> bool:
@@ -199,11 +208,11 @@ class HW_PluginBase(BasePlugin, ABC):
 
 
 class HardwareClientBase(ABC):
-    handler = None  # type: Optional['HardwareHandlerBase']
-
-    def __init__(self, *, plugin: 'HW_PluginBase'):
+    def __init__(self, *, plugin: 'HW_PluginBase', device_descriptor: 'Device', handler: 'HardwareHandlerBase'):
         assert_runs_in_hwd_thread()
         self.plugin = plugin
+        self.device_descriptor = device_descriptor
+        self.handler = handler
 
     def device_manager(self) -> 'DeviceMgr':
         return self.plugin.device_manager()
@@ -216,6 +225,11 @@ class HardwareClientBase(ABC):
     def close(self):
         pass
 
+    def abort(self):
+        """abort the current operation (if any). not on hww thread, as that thread is likely blocking
+           TODO: enforce running NOT on hww thread."""
+        pass
+
     def timeout(self, cutoff) -> None:  # noqa: B027
         pass
 
@@ -224,7 +238,7 @@ class HardwareClientBase(ABC):
         """True if initialized, False if wiped."""
         pass
 
-    def label(self) -> Optional[str]:
+    def label(self, *, avoid_pairing: bool = False) -> Optional[str]:
         """The name given by the user to the device.
 
         Note: labels are shown to the user to help distinguish their devices,
@@ -235,15 +249,34 @@ class HardwareClientBase(ABC):
         # it is supposed to work), make sure the return value is in electrum.plugin.PLACEHOLDER_HW_CLIENT_LABELS
         return " "
 
-    def get_soft_device_id(self) -> Optional[str]:
+    def get_soft_device_id(self, *, avoid_pairing: bool = False) -> Optional[str]:
         """An id-like string that is used to distinguish devices programmatically.
         This is a long term id for the device, that does not change between reconnects.
         This method should not prompt the user, i.e. no user interaction, as it is used
         during USB device enumeration (called for each unpaired device).
         Stored in the wallet file.
+
+        In case the device is unpaired, we return None
         """
+        if not self.is_paired():
+            return None
         root_fp = self.request_root_fingerprint_from_device()
         return root_fp
+
+    def is_paired(self):
+        return True
+
+    def get_device_info_for_enumeration(self) -> 'DeviceInfo':
+        # retrieve DeviceInfo without triggering pairing (same behaviour as handler==None)
+        device = self.device_descriptor  # TODO: generalize? bitbox02 specific? Device must always be recorded
+        return DeviceInfo(
+            device=device,
+            label=self.label() if self.is_paired() else HardwareClientBase.label(self),
+            initialized=self.is_initialized(),
+            plugin_name=self.plugin.name,
+            soft_device_id=self.get_soft_device_id() if self.is_paired() else HardwareClientBase.get_soft_device_id(self),
+            model_name=self.device_model_name()
+        )
 
     @abstractmethod
     def has_usable_connection_with_device(self) -> bool:
@@ -320,6 +353,11 @@ class HardwareHandlerBase:
         if self.win is not None:
             if hasattr(self.win, 'gui_thread'):
                 return self.win.gui_thread
+
+    def open_hid_device(self, device: 'Device'):
+        hid_device = hid.device()
+        hid_device.open_path(device.path)
+        return hid_device
 
     def update_status(self, paired: bool) -> None:
         pass

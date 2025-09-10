@@ -11,7 +11,7 @@ from electrum.transaction import PartialTransaction, Transaction
 from electrum.wallet import Multisig_Wallet
 from electrum.util import UserFacingException
 from electrum.logging import get_logger
-from electrum.plugin import runs_in_hwd_thread, Device
+from electrum.plugin import runs_in_hwd_thread, Device, DeviceTransport
 from electrum.network import Network
 
 from electrum.hw_wallet import HW_PluginBase, HardwareClientBase
@@ -87,7 +87,8 @@ def _http_request(params):
     json_response = Network.send_http_on_proxy(method, url, json=json_payload)
     return {'body': json.loads(json_response)}
 
-class Jade_Client(HardwareClientBase):
+
+class JadeClient(HardwareClientBase):
 
     @staticmethod
     def _network() -> str:
@@ -107,11 +108,12 @@ class Jade_Client(HardwareClientBase):
     def _convertAddrType(cls, addrType: str, multisig: bool) -> str:
         return cls.MULTI_ADDRTYPES[addrType] if multisig else cls.ADDRTYPES[addrType]
 
-    def __init__(self, device: str, plugin: HW_PluginBase):
-        HardwareClientBase.__init__(self, plugin=plugin)
+    def __init__(self, device_descriptor: 'Device', plugin: HW_PluginBase):
+        HardwareClientBase.__init__(self, plugin=plugin, device_descriptor=device_descriptor)
 
+        device_path = device_descriptor.path
         # Connect with a small timeout to test connection
-        self.jade = JadeAPI.create_serial(device, timeout=1)
+        self.jade = JadeAPI.create_serial(device_path, timeout=1)
         self.jade.connect()
 
         verinfo = self.jade.get_version_info()
@@ -120,7 +122,7 @@ class Jade_Client(HardwareClientBase):
         self.jade.disconnect()
 
         # Reconnect with the default timeout for all subsequent calls
-        self.jade = JadeAPI.create_serial(device)
+        self.jade = JadeAPI.create_serial(device_path)
         self.jade.connect()
 
         # Push some host entropy into jade
@@ -329,13 +331,14 @@ class JadePlugin(HW_PluginBase):
         if self.SIMULATOR_PATH is not None and self.SIMULATOR_TEST_SEED is not None:
             try:
                 # If we can connect to a simulator and poke a seed in, add that too
-                client = Jade_Client(self.SIMULATOR_PATH, plugin=self)
                 device = Device(path=self.SIMULATOR_PATH,
                                 interface_number=-1,
                                 id_='Jade Qemu Simulator',
                                 product_key=self.DEVICE_IDS[0],
                                 usage_page=-1,
-                                transport_ui_string='simulator')
+                                transport_ui_string='simulator',
+                                transport=DeviceTransport.TCP)
+                client = JadeClient(device, plugin=self)
                 if client.jade.set_seed(self.SIMULATOR_TEST_SEED):
                     devices.append(device)
                 client.close()
@@ -367,8 +370,8 @@ class JadePlugin(HW_PluginBase):
         return version
 
     @runs_in_hwd_thread
-    def create_client(self, device, handler):
-        client = Jade_Client(device.path, plugin=self)
+    def create_client(self, device_descriptor: 'Device', handler):
+        client = JadeClient(device_descriptor, plugin=self)
 
         # Check minimum supported firmware version
         if self.MIN_SUPPORTED_FW_VERSION > client.fwversion:

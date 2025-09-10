@@ -32,7 +32,7 @@ source.exclude_dirs =
     electrum/utils,
     electrum/gui/qt,
     electrum/plugins/audio_modem,
-    electrum/plugins/bitbox02,
+#    electrum/plugins/bitbox02,
     electrum/plugins/coldcard,
     electrum/plugins/digitalbitbox,
     electrum/plugins/jade,
@@ -71,6 +71,7 @@ version.filename = %(source.dir)s/electrum/version.py
 requirements =
     hostpython3,
     python3,
+    libusb,
     android,
     openssl,
     plyer,
@@ -79,7 +80,8 @@ requirements =
     cryptography,
     pyqt6sip,
     pyqt6,
-    libzbar
+    libzbar,
+    hidapi
 
 # (str) Presplash of the application
 presplash.filename = %(source.dir)s/electrum/gui/icons/electrum_presplash.png

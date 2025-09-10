@@ -1,13 +1,14 @@
 import os
+import threading
 from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import pyqtProperty, pyqtSignal, pyqtSlot, QObject
 
 from electrum.logging import get_logger
 from electrum import mnemonic
-from electrum.wizard import NewWalletWizard, ServerConnectWizard, TermsOfUseWizard
+from electrum.wizard import NewWalletWizard, ServerConnectWizard, TermsOfUseWizard, WizardViewState
 from electrum.storage import WalletStorage, StorageReadWriteError
-from electrum.util import WalletFileException
+from electrum.util import WalletFileException, UserCancelled
 from electrum.gui import messages
 
 if TYPE_CHECKING:
@@ -26,8 +27,14 @@ class QEAbstractWizard(QObject):
         QObject.__init__(self, parent)
 
     @pyqtSlot(result=str)
-    def startWizard(self):
-        self.start()
+    @pyqtSlot(str, result=str)
+    @pyqtSlot(str, 'QJSValue', result=str)
+    def startWizard(self, initial_view: str = None, initial_data=None):
+        vs = None
+        if initial_view:
+            wizard_data = initial_data.toVariant() if initial_data else None
+            vs = WizardViewState(view=initial_view, wizard_data=wizard_data, params={})
+        self.start(start_viewstate=vs)
         return self._current.view
 
     @pyqtSlot(str, result=str)
@@ -38,7 +45,7 @@ class QEAbstractWizard(QObject):
     def submit(self, wizard_data):
         wdata = wizard_data.toVariant()
         view = self.resolve_next(self._current.view, wdata)
-        return { 'view': view.view, 'wizard_data': view.wizard_data }
+        return {'view': view.view, 'wizard_data': view.wizard_data}
 
     @pyqtSlot(result='QVariant')
     def prev(self):
@@ -65,6 +72,10 @@ class QENewWalletWizard(NewWalletWizard, QEAbstractWizard):
         # attach view names and accept handlers
         self.navmap_merge({
             'wallet_name': {'gui': 'WCWalletName'},
+            'hw_unlock': {
+                'gui': 'WCChooseHWDevice',
+                'accept': self.choose_hww
+            },
             'wallet_type': {'gui': 'WCWalletType'},
             'keystore_type': {'gui': 'WCKeystoreType'},
             'create_seed': {'gui': 'WCCreateSeed'},
@@ -84,6 +95,50 @@ class QENewWalletWizard(NewWalletWizard, QEAbstractWizard):
             'imported': {'gui': 'WCImport'},
             'wallet_password': {'gui': 'WCWalletPassword'}
         })
+
+    def choose_hww(self, wizard_data):
+        current_cosigner = self.current_cosigner(wizard_data)
+        device_uid = current_cosigner['hardware_uid']
+        device_info = self._qedaemon.hardwareListModel.get_device_info(device_uid)
+        if not device_info:
+            raise Exception('selected hww not found')
+        current_cosigner['hardware_device'] = (device_info.plugin_name, device_info)
+
+    @pyqtSlot(str)
+    def unlockHww(self, device_uid):
+        device_info = self._qedaemon.hardwareListModel.get_device_info(device_uid)
+        if not device_info:
+            raise Exception('selected hww not found')
+
+        plugin = self.plugins.get_plugin(device_info.plugin_name)  # type: QmlPluginBase
+        handler = plugin.create_handler(device_uid)
+        # TODO: create_client -> client_by_id?
+        client = self.plugins.device_manager.create_client(device_info.device, handler, plugin)
+        client.handler = handler
+        # self.title = _('Unlocking {} ({})').format(_info.model_name, _info.label)
+
+        def unlock_task(client):
+            try:
+                self.password = client.get_password_for_storage_encryption()
+                # TODO: we have the password, let GUI know
+                client.handler.show_message('Unlocked')
+                client.handler.password_available.emit()
+
+            except UserCancelled as e:
+                client.handler.show_error(repr(e))
+            except Exception as e:
+                client.handler.show_error(repr(e))
+                # self.error = repr(e)  # TODO: handle user interaction exceptions (e.g. invalid pin) more gracefully
+                self._logger.exception(repr(e))
+            # self.busy = False
+            # self.validate()
+
+        t = threading.Thread(target=unlock_task, args=(client,), daemon=True)
+        t.start()
+
+    @pyqtSlot(result=str)
+    def getHwwPassword(self):
+        return self.password
 
     pathChanged = pyqtSignal()
     @pyqtProperty(str, notify=pathChanged)

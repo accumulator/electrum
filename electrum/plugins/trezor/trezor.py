@@ -219,21 +219,21 @@ class TrezorPlugin(HW_PluginBase):
                 for d in devices]
 
     @runs_in_hwd_thread
-    def create_client(self, device, handler):
+    def create_client(self, device_descriptor: 'Device', handler):
         try:
-            self.logger.info(f"connecting to device at {device.path}")
-            transport = trezorlib.transport.get_transport(device.path)
+            self.logger.info(f"connecting to device at {device_descriptor.path}")
+            transport = trezorlib.transport.get_transport(device_descriptor.path)
         except BaseException as e:
-            self.logger.info(f"cannot connect at {device.path} {e}")
+            self.logger.info(f"cannot connect at {device_descriptor.path} {e}")
             return None
 
         if not transport:
-            self.logger.info(f"cannot connect at {device.path}")
+            self.logger.info(f"cannot connect at {device_descriptor.path}")
             return
 
-        self.logger.info(f"connected to device at {device.path}")
+        self.logger.info(f"connected to device at {device_descriptor.path}")
         # note that this call can still raise!
-        return TrezorClientBase(transport, handler, self)
+        return TrezorClientBase(device_descriptor, transport, handler, self)
 
     @runs_in_hwd_thread
     def get_client(self, keystore, force_pair=True, *,

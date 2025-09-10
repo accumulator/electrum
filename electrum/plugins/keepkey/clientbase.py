@@ -103,12 +103,11 @@ class GuiMixin(object):
 
 class KeepKeyClientBase(HardwareClientBase, GuiMixin, Logger):
 
-    def __init__(self, handler, plugin, proto):
+    def __init__(self, device_descriptor, handler, plugin, proto):
         assert hasattr(self, 'tx_api')  # ProtocolMixin already constructed?
-        HardwareClientBase.__init__(self, plugin=plugin)
+        HardwareClientBase.__init__(self, plugin=plugin, device_descriptor=device_descriptor, handler=handler)
         self.proto = proto
         self.device = plugin.device
-        self.handler = handler
         self.tx_api = plugin
         self.types = plugin.types
         self.msg = None

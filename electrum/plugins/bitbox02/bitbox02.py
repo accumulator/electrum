@@ -1,6 +1,7 @@
 #
 # BitBox02 Electrum plugin code.
 #
+from functools import wraps, partial
 
 import hid
 from typing import TYPE_CHECKING, Dict, Tuple, Optional, List, Any, Callable
@@ -14,7 +15,7 @@ from electrum.transaction import PartialTransaction, Sighash
 from electrum.wallet import Multisig_Wallet, Deterministic_Wallet
 from electrum.util import UserFacingException
 from electrum.logging import get_logger
-from electrum.plugin import Device, DeviceInfo, runs_in_hwd_thread
+from electrum.plugin import DeviceInfo, runs_in_hwd_thread, Plugins
 from electrum.simple_config import SimpleConfig
 from electrum.storage import get_derivation_used_for_hw_device_encryption
 from electrum.bitcoin import OnchainOutputType
@@ -25,6 +26,7 @@ from electrum.hw_wallet import HW_PluginBase, HardwareClientBase, HardwareHandle
 
 if TYPE_CHECKING:
     from electrum.wizard import NewWalletWizard
+    from electrum.plugin import Device
 
 _logger = get_logger(__name__)
 
@@ -41,17 +43,38 @@ except ImportError as e:
     requirements_ok = False
 
 
+def with_paired_device(func=None, do_pair: bool = True):
+    """decorator for Client methods, check connection/pairing preconditions for communicating with device,
+       optionally triggering pairing steps."""
+    if func is None:
+        return partial(with_paired_device, do_pair=do_pair)
+
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        if self.bitbox02_device is None:
+            if do_pair:
+                _logger.info(f'{str(self)}.{func.__name__}: pairing device')
+                self.pairing_dialog()
+            if self.bitbox02_device is None:
+                _logger.error(f'{str(self)}.{func.__name__}: error: device not paired')
+                raise BitBox02NotPaired("Need to setup communication first before attempting any BitBox02 calls")
+        return func(self, *args, **kwargs)
+    return wrapper
+
+
 class BitBox02NotInitialized(UserFacingException):
+    pass
+
+
+class BitBox02NotPaired(UserFacingException):
     pass
 
 
 class BitBox02Client(HardwareClientBase):
     # handler is a BitBox02_Handler, importing it would lead to a circular dependency
-    def __init__(self, handler: HardwareHandlerBase, device: Device, config: SimpleConfig, *, plugin: HW_PluginBase):
-        HardwareClientBase.__init__(self, plugin=plugin)
+    def __init__(self, handler: HardwareHandlerBase, device_descriptor: 'Device', config: SimpleConfig, *, plugin: HW_PluginBase):
+        HardwareClientBase.__init__(self, plugin=plugin, device_descriptor=device_descriptor, handler=handler)
         self.bitbox02_device = None  # type: Optional[bitbox02.BitBox02]
-        self.handler = handler
-        self.device_descriptor = device
         self.config = config
         self.bitbox_hid_info = None
         if self.config.get("bitbox02") is None:
@@ -61,22 +84,27 @@ class BitBox02Client(HardwareClientBase):
             }
             self.config.set_key("bitbox02", bitbox02_config)
 
-        bitboxes = devices.get_any_bitbox02s()
-        for bitbox in bitboxes:
-            if (
-                bitbox["path"] == self.device_descriptor.path
-                and bitbox["interface_number"]
-                == self.device_descriptor.interface_number
-            ):
-                self.bitbox_hid_info = bitbox
-        if self.bitbox_hid_info is None:
-            raise Exception("No BitBox02 detected")
+        _logger.info(f'device {device_descriptor!r}')
+        bitbox = {
+            'path': device_descriptor.path,
+            'vendor_id': device_descriptor.product_key[0],
+            'product_id': device_descriptor.product_key[1],
+            'interface_number': 0,
+            'bus_type': 1,
+            'serial_number': '',
+            'product_string': device_descriptor.product_name,
+        }
+        self.bitbox_hid_info = bitbox
+        self.hid_device: hid.device = None
 
     def device_model_name(self) -> Optional[str]:
         return 'BitBox02'
 
     def is_initialized(self) -> bool:
         return True
+
+    def is_paired(self):
+        return bool(self.bitbox02_device)
 
     @runs_in_hwd_thread
     def close(self):
@@ -85,14 +113,18 @@ class BitBox02Client(HardwareClientBase):
         except Exception:
             pass
 
+    def abort(self):
+        if self.hid_device:
+            self.hid_device.close()
+
     def has_usable_connection_with_device(self) -> bool:
         if self.bitbox_hid_info is None:
             return False
         return True
 
     @runs_in_hwd_thread
-    def get_soft_device_id(self) -> Optional[str]:
-        if self.handler is None:
+    def get_soft_device_id(self, *, avoid_pairing: bool = False) -> Optional[str]:
+        if (avoid_pairing and not self.bitbox02_device) or self.handler is None:
             # Can't do the pairing without the handler. This happens at wallet creation time, when
             # listing the devices.
             return None
@@ -104,12 +136,12 @@ class BitBox02Client(HardwareClientBase):
     def pairing_dialog(self):
         def pairing_step(code: str, device_response: Callable[[], bool]) -> bool:
             msg = "Please compare and confirm the pairing code on your BitBox02:\n" + code
-            self.handler.show_message(msg)
+            self.handler.show_message(msg, on_cancel=lambda: self.hid_device.close())
             try:
                 res = device_response()
             except Exception:
                 # Close the hid device on exception
-                hid_device.close()
+                self.hid_device.close()
                 raise
             finally:
                 self.handler.finished()
@@ -173,16 +205,26 @@ class BitBox02Client(HardwareClientBase):
                 return set_noise_privkey(privkey)
 
         if self.bitbox02_device is None:
-            hid_device = hid.device()
-            hid_device.open_path(self.bitbox_hid_info["path"])
+            self.hid_device = self.handler.open_hid_device(self.device_descriptor)
+            # bitbox02 module needs 'serial_number', which is only available after opening connection
+            self.bitbox_hid_info['serial_number'] = self.hid_device.get_serial_number_string()
 
-            bitbox02_device = bitbox02.BitBox02(
-                transport=u2fhid.U2FHid(hid_device),
-                device_info=self.bitbox_hid_info,
-                noise_config=NoiseConfig(),
+            self.handler.show_message(
+                f'Please unlock your {self.bitbox_hid_info["product_string"]} device',
+                on_cancel=lambda: self.hid_device.close()
             )
+
+            bitbox02_device = None
             try:
+                bitbox02_device = bitbox02.BitBox02(
+                    transport=u2fhid.U2FHid(self.hid_device),
+                    device_info=self.bitbox_hid_info,
+                    noise_config=NoiseConfig(),
+                )
                 bitbox02_device.check_min_version()
+            except ValueError as e:
+                if str(e) != 'not open':  # ValueError('not open') is raised if we client.abort()
+                    raise
             except FirmwareVersionOutdatedException:
                 raise
             self.bitbox02_device = bitbox02_device
@@ -202,31 +244,17 @@ class BitBox02Client(HardwareClientBase):
         return bitbox02.btc.BTC
 
     @runs_in_hwd_thread
+    @with_paired_device
     def get_password_for_storage_encryption(self) -> str:
-        if self.bitbox02_device is None:
-            self.pairing_dialog()
-
-        if self.bitbox02_device is None:
-            raise Exception(
-                "Need to setup communication first before attempting any BitBox02 calls"
-            )
-
         derivation = get_derivation_used_for_hw_device_encryption()
         derivation_list = bip32.convert_bip32_strpath_to_intpath(derivation)
         xpub = self.bitbox02_device.electrum_encryption_key(derivation_list)
-        node = bip32.BIP32Node.from_xkey(xpub, net = constants.BitcoinMainnet()).subkey_at_public_derivation(())
+        node = bip32.BIP32Node.from_xkey(xpub, net=constants.BitcoinMainnet()).subkey_at_public_derivation(())
         return node.eckey.get_public_key_bytes(compressed=True).hex()
 
     @runs_in_hwd_thread
+    @with_paired_device
     def get_xpub(self, bip32_path: str, xtype: str, *, display: bool = False) -> str:
-        if self.bitbox02_device is None:
-            self.pairing_dialog()
-
-        if self.bitbox02_device is None:
-            raise Exception(
-                "Need to setup communication first before attempting any BitBox02 calls"
-            )
-
         self.fail_if_not_initialized()
 
         xpub_keypath = bip32.convert_bip32_strpath_to_intpath(bip32_path)
@@ -260,8 +288,8 @@ class BitBox02Client(HardwareClientBase):
                                              display=display)
 
     @runs_in_hwd_thread
-    def label(self) -> str:
-        if self.handler is None:
+    def label(self, *, avoid_pairing: bool = False) -> str:
+        if (avoid_pairing and not self.bitbox02_device) or self.handler is None:
             # Can't do the pairing without the handler. This happens at wallet creation time, when
             # listing the devices.
             return super().label()
@@ -275,12 +303,8 @@ class BitBox02Client(HardwareClientBase):
         )
 
     @runs_in_hwd_thread
+    @with_paired_device(do_pair=False)
     def request_root_fingerprint_from_device(self) -> str:
-        if self.bitbox02_device is None:
-            raise Exception(
-                "Need to setup communication first before attempting any BitBox02 calls"
-            )
-
         return self.bitbox02_device.root_fingerprint().hex()
 
     def is_pairable(self) -> bool:
@@ -289,6 +313,7 @@ class BitBox02Client(HardwareClientBase):
         return True
 
     @runs_in_hwd_thread
+    @with_paired_device(do_pair=False)
     def btc_multisig_config(
         self, coin, bip32_path: List[int], wallet: Multisig_Wallet, xtype: str,
     ):
@@ -298,10 +323,6 @@ class BitBox02Client(HardwareClientBase):
         xtype: 'p2wsh' | 'p2wsh-p2sh'
         """
         assert xtype in ("p2wsh", "p2wsh-p2sh")
-        if self.bitbox02_device is None:
-            raise Exception(
-                "Need to setup communication first before attempting any BitBox02 calls"
-            )
         account_keypath = bip32_path[:-2]
         xpubs = wallet.get_master_public_keys()
         our_xpub = self.get_xpub(
@@ -339,15 +360,10 @@ class BitBox02Client(HardwareClientBase):
         return multisig_config
 
     @runs_in_hwd_thread
+    @with_paired_device(do_pair=False)
     def show_address(
         self, bip32_path: str, address_type: str, wallet: Deterministic_Wallet
     ) -> str:
-
-        if self.bitbox02_device is None:
-            raise Exception(
-                "Need to setup communication first before attempting any BitBox02 calls"
-            )
-
         address_keypath = bip32.convert_bip32_strpath_to_intpath(bip32_path)
         coin_network = self.coin_network_from_electrum_network()
 
@@ -384,6 +400,7 @@ class BitBox02Client(HardwareClientBase):
         return bitbox02.btc.TBTC if constants.net.TESTNET else bitbox02.btc.BTC
 
     @runs_in_hwd_thread
+    @with_paired_device(do_pair=False)
     def sign_transaction(
         self,
         keystore: Hardware_KeyStore,
@@ -392,11 +409,6 @@ class BitBox02Client(HardwareClientBase):
     ):
         if tx.is_complete():
             return
-
-        if self.bitbox02_device is None:
-            raise Exception(
-                "Need to setup communication first before attempting any BitBox02 calls"
-            )
 
         coin = self._get_coin()
         tx_script_type = None
@@ -541,12 +553,8 @@ class BitBox02Client(HardwareClientBase):
         signatures = [ecc.ecdsa_der_sig_from_ecdsa_sig64(x[1]) + sighash for x in sigs]
         tx.update_signatures(signatures)
 
+    @with_paired_device(do_pair=False)
     def sign_message(self, keypath: str, message: bytes, script_type: str) -> bytes:
-        if self.bitbox02_device is None:
-            raise Exception(
-                "Need to setup communication first before attempting any BitBox02 calls"
-            )
-
         try:
             simple_type = {
                 "p2wpkh-p2sh":bitbox02.btc.BTCScriptConfig.P2WPKH_P2SH,
@@ -646,6 +654,9 @@ class BitBox02Plugin(HW_PluginBase):
 
     SUPPORTED_XTYPES = ("p2wpkh-p2sh", "p2wpkh", "p2wsh", "p2wsh-p2sh")
 
+    icon_unpaired = "bitbox02_unpaired.png"
+    icon_paired = "bitbox02.png"
+
     def __init__(self, parent: HW_PluginBase, config: SimpleConfig, name: str):
         super().__init__(parent, config, name)
 
@@ -666,8 +677,8 @@ class BitBox02Plugin(HW_PluginBase):
             raise ImportError()
 
     @runs_in_hwd_thread
-    def create_client(self, device, handler) -> BitBox02Client:
-        return BitBox02Client(handler, device, self.config, plugin=self)
+    def create_client(self, device_descriptor: 'Device', handler) -> BitBox02Client:
+        return BitBox02Client(handler, device_descriptor, self.config, plugin=self)
 
     @runs_in_hwd_thread
     def show_address(
@@ -693,12 +704,12 @@ class BitBox02Plugin(HW_PluginBase):
         xtype = keystore.get_bip32_node_for_xpub().xtype
         client.get_xpub(derivation, xtype, display=True)
 
-    def create_device_from_hid_enumeration(self, d: dict, *, product_key) -> 'Device':
-        device = super().create_device_from_hid_enumeration(d, product_key=product_key)
-        # The BitBox02's product_id is not unique per device, thus use the path instead to
-        # distinguish devices.
-        id_ = str(d['path'])
-        return device._replace(id_=id_)
+    # def create_device_from_hid_enumeration(self, d: dict, *, product_key) -> 'Device':
+    #     device = super().create_device_from_hid_enumeration(d, product_key=product_key)
+    #     # The BitBox02's product_id is not unique per device, thus use the path instead to
+    #     # distinguish devices.
+    #     id_ = str(d['path'])
+    #     return device._replace(id_=id_)
 
     def wizard_entry_for_device(self, device_info: 'DeviceInfo', *, new_wallet=True) -> str:
         # Note: device_info.initialized for this hardware doesn't imply a seed is present,

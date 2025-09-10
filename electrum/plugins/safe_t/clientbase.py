@@ -1,6 +1,6 @@
 import time
 from struct import pack
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 import electrum_ecc as ecc
 
@@ -11,6 +11,9 @@ from electrum.bip32 import BIP32Node, convert_bip32_strpath_to_intpath
 from electrum.logging import Logger
 from electrum.plugin import runs_in_hwd_thread
 from electrum.hw_wallet.plugin import HardwareClientBase, HardwareHandlerBase
+
+if TYPE_CHECKING:
+    from electrum.plugin import Device
 
 
 class GuiMixin(object):
@@ -105,12 +108,11 @@ class GuiMixin(object):
 
 class SafeTClientBase(HardwareClientBase, GuiMixin, Logger):
 
-    def __init__(self, handler, plugin, proto):
+    def __init__(self, device_descriptor: 'Device', handler, plugin, proto):
         assert hasattr(self, 'tx_api')  # ProtocolMixin already constructed?
-        HardwareClientBase.__init__(self, plugin=plugin)
+        HardwareClientBase.__init__(self, plugin=plugin, device_descriptor=device_descriptor, handler=handler)
         self.proto = proto
         self.device = plugin.device
-        self.handler = handler
         self.tx_api = plugin
         self.types = plugin.types
         self.msg = None

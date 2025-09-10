@@ -645,6 +645,19 @@ ApplicationWindow
             console.log('wallet requires password')
             showOpenWalletDialog(name, path)
         }
+        function onWalletRequiresHardwareDevice(name, path) {
+            var dialog = app.newWalletWizard.createObject(app, {
+                wizardTitle: qsTr('Open wallet'),
+                new_wallet: false,
+                initial_view: 'hw_unlock',
+                initial_data: {}
+            })
+            dialog.accepted.connect(function() {
+                console.log('accepted')
+                Daemon.loadWallet(path, dialog.wiz.getHwwPassword())
+            })
+            dialog.open()
+        }
         function onWalletOpenError(error) {
             console.log('wallet open error')
             var dialog = app.messageDialog.createObject(app, {
