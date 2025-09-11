@@ -364,6 +364,12 @@ class HardwareHandlerBase:
             if hasattr(self.win, 'gui_thread'):
                 return self.win.gui_thread
 
+    def open_hid_device(self, device: 'Device'):
+        import hid
+        hid_device = hid.device()
+        hid_device.open_path(device.path)
+        return hid_device
+
     def update_status(self, paired: bool) -> None:
         pass
 
