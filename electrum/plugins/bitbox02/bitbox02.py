@@ -135,7 +135,7 @@ class BitBox02Client(HardwareClientBase):
     @runs_in_hwd_thread
     def pairing_dialog(self):
         def pairing_step(code: str, device_response: Callable[[], bool]) -> bool:
-            msg = "Please compare and confirm the pairing code on your BitBox02:\n" + code
+            msg = "Please compare and confirm the pairing code on your BitBox02:\n\n" + code
             self.handler.show_message(msg, on_cancel=lambda: self.hid_device.close())
             try:
                 res = device_response()
@@ -227,6 +227,8 @@ class BitBox02Client(HardwareClientBase):
                     raise
             except FirmwareVersionOutdatedException:
                 raise
+            else:
+                self.handler.finished()
             self.bitbox02_device = bitbox02_device
 
         self.fail_if_not_initialized()

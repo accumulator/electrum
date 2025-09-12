@@ -84,6 +84,7 @@ class QENewWalletWizard(NewWalletWizard, QEAbstractWizard):
             'confirm_ext': {'gui': 'WCConfirmExt'},
             'have_seed': {'gui': 'WCHaveSeed'},
             'have_ext': {'gui': 'WCEnterExt'},
+            'choose_hardware_device': {'gui': 'WCChooseHWDevice'},
             'script_and_derivation': {'gui': 'WCScriptAndDerivation'},
             'have_master_key': {'gui': 'WCHaveMasterKey'},
             'multisig': {'gui': 'WCMultisig'},
@@ -137,6 +138,50 @@ class QENewWalletWizard(NewWalletWizard, QEAbstractWizard):
     @pyqtSlot(result=str)
     def getHwwPassword(self):
         return self.password
+
+    @pyqtSlot(str)
+    def hwwGetXpub(self, device_uid):
+        device_info = self._qedaemon.hardwareListModel.get_device_info(device_uid)
+        if not device_info:
+            raise Exception('selected hww not found')
+
+        cosigner_data = self.current_cosigner(self._current.wizard_data)
+        plugin = self.plugins.get_plugin(device_info.plugin_name)  # type: QmlPluginBase
+        # handler = plugin.create_handler(device_uid)
+        # TODO: create_client -> client_by_id?
+        client = self.plugins.device_manager.client_by_id(device_uid)  #create_client(device_info.device, handler, plugin)
+        # client.handler = handler
+        # self.title = _('Unlocking {} ({})').format(_info.model_name, _info.label)
+
+        xtype = cosigner_data['script_type']
+        derivation = cosigner_data['derivation_path']
+
+        def get_xpub_task(_client, _derivation, _xtype):
+            _client.handler.show_message('...')
+            try:
+                # self.xpub = self.get_xpub_from_client(_client, _derivation, _xtype)
+                self.xpub = _client.get_xpub(_derivation, _xtype)
+                self.root_fingerprint = _client.request_root_fingerprint_from_device()
+                self.label = _client.label()
+                self.soft_device_id = _client.get_soft_device_id()
+            # except UserFacingException as e:
+            #     self.error = str(e)
+            #     self.logger.error(repr(e))
+            except Exception as e:
+                self.error = repr(e)  # TODO: handle user interaction exceptions (e.g. invalid pin) more gracefully
+                self._logger.exception(repr(e))
+                _client.handler.show_error(self.error)
+                self.xpub = None
+            if self.xpub:
+                self._logger.debug(f'Done retrieve xpub: {self.xpub[:10]}...{self.xpub[-5:]}')
+                _client.handler.show_message('xpub retrieved')
+
+
+            # self.busy = False
+            # self.validate()
+
+        t = threading.Thread(target=get_xpub_task, args=(client, derivation, xtype), daemon=True)
+        t.start()
 
     pathChanged = pyqtSignal()
     @pyqtProperty(str, notify=pathChanged)

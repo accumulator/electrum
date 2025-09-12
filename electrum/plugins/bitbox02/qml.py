@@ -31,9 +31,9 @@ class Plugin(BitBox02Plugin, QmlPluginBase):
     def extend_wizard(self, wizard: 'QENewWalletWizard'):
         super().extend_wizard(wizard)
         views = {
-            # 'bitbox02_start': {'gui': WCBitbox02ScriptAndDerivation},
-            # 'bitbox02_xpub': {'gui': WCHWXPub},
-            # 'bitbox02_not_initialized': {'gui': WCHWUninitialized},
+            'bitbox02_start': {'gui': '../../../../plugins/bitbox02/qml/WCBitbox02ScriptAndDerivation'},
+            'bitbox02_xpub': {'gui': 'WCHWXPub'},
+            'bitbox02_not_initialized': {'gui': 'WCHWUninitialized'},
             'bitbox02_unlock': {'gui': 'WCHWUnlock'}
         }
         wizard.navmap_merge(views)

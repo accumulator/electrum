@@ -12,6 +12,7 @@ WizardComponent {
     valid: false
 
     property bool isMultisig: false
+    property bool isHardware: false
     property int cosigner: 0
     property int participants: 0
 
@@ -189,7 +190,7 @@ WizardComponent {
                 Layout.alignment: Qt.AlignHCenter
                 Layout.topMargin: constants.paddingLarge
                 padding: 0
-                visible: !isMultisig
+                visible: !isMultisig && !isHardware
                 background: Rectangle {
                     color: Qt.lighter(Material.dialogColor, 1.5)
                 }
@@ -238,6 +239,7 @@ WizardComponent {
                 cosigner = wizard_data['multisig_current_cosigner']
             validate()
         }
+        isHardware = wizard_data['keystore_type'] == 'hardware'
     }
 }
 
