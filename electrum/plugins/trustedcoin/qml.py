@@ -61,10 +61,10 @@ class Plugin(TrustedCoinPlugin):
         super().extend_wizard(wizard)
         views = {
             'trustedcoin_start': {
-                'gui': '../../../../plugins/trustedcoin/qml/Disclaimer',
+                'gui': self.relpath('qml/Disclaimer'),
             },
             'trustedcoin_choose_seed': {
-                'gui': '../../../../plugins/trustedcoin/qml/ChooseSeed',
+                'gui': self.relpath('qml/ChooseSeed'),
             },
             'trustedcoin_create_seed': {
                 'gui': 'WCCreateSeed',
@@ -85,16 +85,16 @@ class Plugin(TrustedCoinPlugin):
                 'gui': 'WCEnterExt',
             },
             'trustedcoin_keep_disable': {
-                'gui': '../../../../plugins/trustedcoin/qml/KeepDisable',
+                'gui': self.relpath('qml/KeepDisable'),
             },
             'trustedcoin_tos': {
-                'gui': '../../../../plugins/trustedcoin/qml/Terms',
+                'gui': self.relpath('qml/Terms'),
             },
             'trustedcoin_keystore_unlock': {
                 # TODO when QML can import external wallet files
             },
             'trustedcoin_show_confirm_otp': {
-                'gui': '../../../../plugins/trustedcoin/qml/ShowConfirmOTP',
+                'gui': self.relpath('qml/ShowConfirmOTP'),
             }
         }
         wizard.navmap_merge(views)

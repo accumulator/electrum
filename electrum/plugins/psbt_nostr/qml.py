@@ -24,6 +24,7 @@
 # SOFTWARE.
 import asyncio
 import concurrent
+import os
 from typing import TYPE_CHECKING, List, Tuple, Optional
 
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtProperty, pyqtSlot
@@ -54,7 +55,7 @@ class QReceiveSignalObject(QObject):
 
     @pyqtProperty(str)
     def loader(self):
-        return 'main.qml'
+        return self._plugin.relpath(os.path.join('qml', 'main.qml'))
 
     @pyqtSlot(QEWallet, str, result=bool)
     def canSendPsbt(self, wallet: 'QEWallet', tx: str) -> bool:

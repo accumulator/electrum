@@ -848,6 +848,8 @@ class BasePlugin(Logger):
                 l.append((self, getattr(self, k)))
                 hooks[k] = l
 
+        self.fs_root = os.path.dirname(sys.modules[self.__module__].__file__)
+
     def __str__(self):
         return self.name
 
@@ -901,6 +903,10 @@ class BasePlugin(Logger):
         """Returns a dict which is persisted in the per-wallet database."""
         plugin_storage = wallet.db.get_plugin_storage()
         return plugin_storage.setdefault(self.name, {})
+
+    def relpath(self, rel_file_name: str) -> str:
+        """Return absolute path from plugin relative path"""
+        return os.path.join(self.fs_root, rel_file_name)
 
 
 class DeviceUnpairableError(UserFacingException): pass

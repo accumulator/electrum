@@ -687,7 +687,7 @@ ApplicationWindow
             var loader = AppController.plugin(name).loader
             if (loader == undefined)
                 return
-            var url = Qt.resolvedUrl('../../../plugins/' + name + '/qml/' + loader)
+            var url = Qt.resolvedUrl(loader)
             var comp = Qt.createComponent(url)
             if (comp.status == Component.Error) {
                 console.log('Could not find/parse PluginLoader for plugin ' + name)
