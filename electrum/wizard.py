@@ -306,10 +306,14 @@ class KeystoreWizard(AbstractWizard):
 
     def on_hardware_device(self, wizard_data: dict, new_wallet=True) -> str:
         current_cosigner = self.current_cosigner(wizard_data)
-        _type, _info = current_cosigner['hardware_device']
-        plugin = self.plugins.get_plugin(_type)
+        # _type, _info = current_cosigner['hardware_device']
+        hww_id = current_cosigner['hardware_uid']
+        client = self.plugins.device_manager.client_by_id(hww_id)  #
+        _info = client.get_device_info_for_enumeration()
+        # plugin = self.plugins.get_plugin(_type)
+        # plugin = client.plugin
         run_hook('init_wallet_wizard', self)  # TODO: currently only used for hww, hook name might be confusing
-        return plugin.wizard_entry_for_device(_info, new_wallet=new_wallet)
+        return client.plugin.wizard_entry_for_device(_info, new_wallet=new_wallet)
 
     def validate_seed(self, seed: str, seed_variant: str, wallet_type: str) -> Tuple[bool, str, str, bool]:
         seed_type = ''

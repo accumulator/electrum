@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushB
 
 from electrum.bip32 import is_bip32_derivation, BIP32Node, normalize_bip32_derivation, xpub_type
 from electrum.daemon import Daemon
+from electrum.hw_wallet import HardwareClientBase
 from electrum.i18n import _
 from electrum.keystore import bip44_derivation, bip39_to_seed, purpose48_derivation, ScriptTypeNotSupported
 from electrum.plugin import run_hook, HardwarePluginLibraryUnavailable
@@ -1153,7 +1154,7 @@ class WCChooseHWDevice(WalletWizardComponent, Logger):
             except Exception:
                 transport_str = 'unknown transport'
             descr = f"{label} [{info.model_name or name}, {state}, {transport_str}]"
-            choices.append(ChoiceItem(key=(name, info), label=descr))
+            choices.append(ChoiceItem(key=(name, info), label=descr, extra_data=info.device.id_))
         msg = _('Select a device') + ':'
 
         if self.choice_w:
@@ -1252,7 +1253,8 @@ class WCChooseHWDevice(WalletWizardComponent, Logger):
     def apply(self):
         if self.choice_w:
             cosigner_data = self.wizard.current_cosigner(self.wizard_data)
-            cosigner_data['hardware_device'] = self.choice_w.selected_key
+            # cosigner_data['hardware_device'] = self.choice_w.selected_key
+            cosigner_data['hardware_uid'] = self.choice_w.selected_item.extra_data
 
 
 class WCWalletPasswordHardware(WalletWizardComponent):
@@ -1280,8 +1282,9 @@ class WCWalletPasswordHardware(WalletWizardComponent):
         self.wizard_data['encrypt'] = True
         if self.playout.should_encrypt_storage_with_xpub():
             self.wizard_data['xpub_encrypt'] = True
-            _name, _info = self.wizard_data['hardware_device']
-            device_id = _info.device.id_
+            # _name, _info = self.wizard_data['hardware_device']
+            # device_id = _info.device.id_
+            device_id = self.wizard_data['hardware_uid']
             client = self.plugins.device_manager.client_by_id(device_id, scan_now=False)
             # client.handler = self.plugin.create_handler(self.wizard)
             # FIXME client can be None if it was recently disconnected.
@@ -1312,17 +1315,20 @@ class WCHWUnlock(WalletWizardComponent, Logger):
         self.layout().addStretch(1)
 
     def on_ready(self):
-        _name, _info = self.wizard_data['hardware_device']
-        self.plugin = self.plugins.get_plugin(_info.plugin_name)
-        self.title = _('Unlocking {} ({})').format(_info.model_name, _info.label)
+        # _name, _info = self.wizard_data['hardware_device']
+        device_id = self.wizard_data['hardware_uid']
+        # self.plugin = self.plugins.get_plugin(_info.plugin_name)
 
-        device_id = _info.device.id_
+        # device_id = _info.device.id_
         client = self.plugins.device_manager.client_by_id(device_id, scan_now=False)
+        _info = client.get_device_info_for_enumeration()
+        self.title = _('Unlocking {} ({})').format(_info.model_name, _info.label)
         if client is None:
             self.error = _("Client for hardware device was unpaired.")
             self.busy = False
             self.validate()
             return
+        self.plugin = client.plugin
         client.handler = self.plugin.create_handler(self.wizard)
 
         def unlock_task(client):
@@ -1394,17 +1400,22 @@ class WCHWXPub(WalletWizardComponent, Logger):
 
     def on_ready(self):
         cosigner_data = self.wizard.current_cosigner(self.wizard_data)
-        _name, _info = cosigner_data['hardware_device']
-        self.plugin = self.plugins.get_plugin(_info.plugin_name)
-        self.title = _('Retrieving extended public key from {} ({})').format(_info.model_name, _info.label)
+        # _name, _info = cosigner_data['hardware_device']
+        device_id = cosigner_data['hardware_uid']
 
-        device_id = _info.device.id_
+        # self.plugin = self.plugins.get_plugin(_info.plugin_name)
+        # device_id = _info.device.id_
+
         client = self.plugins.device_manager.client_by_id(device_id, scan_now=False)
         if client is None:
             self.error = _("Client for hardware device was unpaired.")
             self.busy = False
             self.validate()
             return
+
+        self.plugin = client.plugin
+        _info = client.get_device_info_for_enumeration()
+        self.title = _('Retrieving extended public key from {} ({})').format(_info.model_name, _info.label)
         if not client.handler:
             client.handler = self.plugin.create_handler(self.wizard)
 
@@ -1431,11 +1442,12 @@ class WCHWXPub(WalletWizardComponent, Logger):
         t = threading.Thread(target=get_xpub_task, args=(client, derivation, xtype), daemon=True)
         t.start()
 
-    def get_xpub_from_client(self, client, derivation, xtype):  # override for HWW specific client if needed
+    def get_xpub_from_client(self, client: 'HardwareClientBase', derivation, xtype):  # override for HWW specific client if needed
         cosigner_data = self.wizard.current_cosigner(self.wizard_data)
-        _name, _info = cosigner_data['hardware_device']
+        # _name, _info = cosigner_data['hardware_device']
         if xtype not in self.plugin.SUPPORTED_XTYPES:
-            raise ScriptTypeNotSupported(_('This type of script is not supported with {}').format(_info.model_name))
+            # raise ScriptTypeNotSupported(_('This type of script is not supported with {}').format(_info.model_name))
+            raise ScriptTypeNotSupported(_('This type of script is not supported with {}').format(client.device_descriptor.product_name))
         return client.get_xpub(derivation, xtype)
 
     def validate(self):
@@ -1456,8 +1468,11 @@ class WCHWXPub(WalletWizardComponent, Logger):
 
     def apply(self):
         cosigner_data = self.wizard.current_cosigner(self.wizard_data)
-        _name, _info = cosigner_data['hardware_device']
-        cosigner_data['hw_type'] = _info.plugin_name
+        # _name, _info = cosigner_data['hardware_device']
+        device_id = cosigner_data['hardware_uid']
+        client = self.wizard.plugins.device_manager.client_by_id(device_id, scan_now=False)
+        # cosigner_data['hw_type'] = _info.plugin_name
+        cosigner_data['hw_type'] = client.plugin.name
         cosigner_data['master_key'] = self.xpub
         cosigner_data['root_fingerprint'] = self.root_fingerprint
         cosigner_data['label'] = self.label
@@ -1470,7 +1485,11 @@ class WCHWUninitialized(WalletWizardComponent):
 
     def on_ready(self):
         cosigner_data = self.wizard.current_cosigner(self.wizard_data)
-        _name, _info = cosigner_data['hardware_device']
+        # _name, _info = cosigner_data['hardware_device']
+        device_id = cosigner_data['hardware_uid']
+        client = self.wizard.plugins.device_manager.client_by_id(device_id, scan_now=False)
+        _info = client.get_device_info_for_enumeration()
+
         w_icon = QLabel()
         w_icon.setPixmap(QPixmap(icon_path('warning.png')).scaledToWidth(48, mode=Qt.TransformationMode.SmoothTransformation))
         w_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)

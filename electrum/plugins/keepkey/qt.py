@@ -602,10 +602,15 @@ class SettingsDialog(WindowModalDialog):
 class WCKeepkeyInitMethod(WalletWizardComponent):
     def __init__(self, parent, wizard):
         WalletWizardComponent.__init__(self, parent, wizard, title=_('KeepKey Setup'))
+        self.plugins = wizard.plugins
 
     def on_ready(self):
         current_cosigner = self.wizard.current_cosigner(self.wizard_data)
-        _name, _info = current_cosigner['hardware_device']
+        # _name, _info = current_cosigner['hardware_device']
+        device_id = current_cosigner['hardware_uid']
+        client = self.plugins.device_manager.client_by_id(device_id, scan_now=False)
+        _info = client.get_device_info_for_enumeration()
+
         msg = _("Choose how you want to initialize your {}.\n\n"
                 "The first two methods are secure as no secret information "
                 "is entered into your computer.\n\n"
@@ -640,8 +645,9 @@ class WCKeepkeyInitParams(WalletWizardComponent):
 
     def on_ready(self):
         current_cosigner = self.wizard.current_cosigner(self.wizard_data)
-        _name, _info = current_cosigner['hardware_device']
-        self.settings_layout = KeepkeyInitLayout(current_cosigner['keepkey_init'], _info.device.id_)
+        # _name, _info = current_cosigner['hardware_device']
+        device_id = current_cosigner['hardware_uid']
+        self.settings_layout = KeepkeyInitLayout(current_cosigner['keepkey_init'], device_id)
         self.settings_layout.validChanged.connect(self.on_settings_valid_changed)
         self.layout().addLayout(self.settings_layout)
         self.layout().addStretch(1)
@@ -672,8 +678,9 @@ class WCKeepkeyInit(WalletWizardComponent, Logger):
         current_cosigner = self.wizard.current_cosigner(self.wizard_data)
         settings = current_cosigner['keepkey_settings']
         method = current_cosigner['keepkey_init']
-        _name, _info = current_cosigner['hardware_device']
-        device_id = _info.device.id_
+        # _name, _info = current_cosigner['hardware_device']
+        # device_id = _info.device.id_
+        device_id = current_cosigner['hardware_uid']
         client = self.plugins.device_manager.client_by_id(device_id, scan_now=False)
         client.handler = self.plugin.create_handler(self.wizard)
 
