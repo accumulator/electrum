@@ -52,6 +52,7 @@ class QmlHandlerBase(HardwareHandlerBase, QObject, Logger):
 
     passphrase_signal = pyqtSignal(object, object)
     message_signal = pyqtSignal(str)
+
     error_signal = pyqtSignal(str)
     word_signal = pyqtSignal(object)
     clear_signal = pyqtSignal()
@@ -73,6 +74,7 @@ class QmlHandlerBase(HardwareHandlerBase, QObject, Logger):
         self.status_signal.connect(self._update_status)
         self.device = device
         self.dialog = None
+        self.plugin = None
         self.done = threading.Event()
 
         self._on_cancel_message = None
@@ -146,7 +148,7 @@ class QmlHandlerBase(HardwareHandlerBase, QObject, Logger):
         # self.done.wait()
         # return self.ok
 
-    def show_message(self, msg, on_cancel=None):
+    def show_message(self, msg, on_cancel: Callable[[], None] = None):
         self._on_cancel_message = on_cancel
         self.message_signal.emit(msg)
 
@@ -257,6 +259,16 @@ class QmlHandlerBase(HardwareHandlerBase, QObject, Logger):
         from electrum.gui.qml.qedaemon import QEDaemon
         client = QEDaemon.instance.plugins.device_manager._client_by_id(self.device)
         client.abort()
+
+    @pyqtSlot(str, result=str)
+    def icon(self, id_):
+        try:
+            return {
+                'paired': os.path.join(self.plugin.fs_root, self.plugin.icon_paired),
+                'unpaired': os.path.join(self.plugin.fs_root, self.plugin.icon_unpaired),
+            }[id_]
+        except Exception as e:
+            return ''
 
 
 class QmlPluginBase(Logger):
@@ -370,6 +382,7 @@ class QmlPluginBase(Logger):
         else:
             # self.logger.debug(f'new handler for {device_uid}')
             handler = self.handler_class(device_uid, parent)
+            handler.plugin = self
             self.handler_map[device_uid] = handler
             return handler
 

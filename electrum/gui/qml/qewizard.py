@@ -120,18 +120,16 @@ class QENewWalletWizard(NewWalletWizard, QEAbstractWizard):
         def unlock_task(client):
             try:
                 self.password = client.get_password_for_storage_encryption()
-                # TODO: we have the password, let GUI know
+                # we have the password, let GUI know
                 client.handler.show_message('Unlocked')
                 client.handler.password_available.emit()
-
             except UserCancelled as e:
                 client.handler.show_error(repr(e))
             except Exception as e:
                 client.handler.show_error(repr(e))
-                # self.error = repr(e)  # TODO: handle user interaction exceptions (e.g. invalid pin) more gracefully
                 self._logger.exception(repr(e))
-            # self.busy = False
-            # self.validate()
+            finally:
+                client.handler.finished()
 
         t = threading.Thread(target=unlock_task, args=(client,), daemon=True)
         t.start()

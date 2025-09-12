@@ -1,3 +1,5 @@
+from typing import TYPE_CHECKING
+
 from PyQt6.QtCore import pyqtSignal, QObject
 
 from electrum.i18n import _
@@ -5,6 +7,9 @@ from electrum.gui.qml.qewizard import QENewWalletWizard
 from electrum.hw_wallet.qml import QmlHandlerBase, QmlPluginBase
 
 from .bitbox02 import BitBox02Plugin
+
+if TYPE_CHECKING:
+    from electrum.hw_wallet import HW_PluginBase
 
 
 class BitBox02Handler(QmlHandlerBase):

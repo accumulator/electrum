@@ -23,11 +23,13 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 import os
+import sys
 from abc import abstractmethod, ABC
 from typing import TYPE_CHECKING, Sequence, Optional, Type, Iterable, Any, Callable
 
 import hid
 
+from electrum import get_logger
 from electrum.plugin import (
     BasePlugin, hook, Device, DeviceMgr, assert_runs_in_hwd_thread, runs_in_hwd_thread, DeviceTransport
 )

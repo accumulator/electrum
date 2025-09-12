@@ -10,10 +10,11 @@ WizardComponent {
     id: root
 
     property QtObject deviceHandler: AppController.deviceHandler(wizard_data['hardware_uid'])
+    property string message
 
     ColumnLayout {
         width: parent.width
-        height: parent.height
+        spacing: constants.paddingLarge
 
         Label {
             Layout.alignment: Qt.AlignTop
@@ -21,10 +22,24 @@ WizardComponent {
             text: qsTr('Unlock hardware wallet')
         }
 
-        InfoTextArea {
-            id: msglabel
+        TextHighlightPane {
             Layout.fillWidth: true
-            visible: text
+            RowLayout {
+                width: parent.width
+                spacing: constants.paddingLarge
+                Image {
+                    id: image
+                    source: deviceHandler.icon('unpaired')
+                }
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    Label {
+                        Layout.fillWidth: true
+                        text: message
+                        wrapMode: Text.Wrap
+                    }
+                }
+            }
         }
     }
 
@@ -36,17 +51,19 @@ WizardComponent {
         target: deviceHandler
         function onMessage_signal(msg, onc) {
             console.log(msg)
-            msglabel.text = msg
-            msglabel.iconStyle = InfoTextArea.IconStyle.Info
+            message = msg
+            // msglabel.iconStyle = InfoTextArea.IconStyle.Spinner
         }
         function onError_signal(msg) {
             console.log('error: ' + msg)
-            msglabel.text = msg
-            msglabel.iconStyle = InfoTextArea.IconStyle.Error
+            message = msg
+            // msglabel.iconStyle = InfoTextArea.IconStyle.Error
             root.valid = false
         }
         function onClear_signal() {
-            msglabel.text = ''
+            console.log('CLEAR')
+            // msglabel.iconStyle = InfoTextArea.IconStyle.Info
+            // msglabel.text = ''
             // root.valid = true
         }
         function onPassword_available() {

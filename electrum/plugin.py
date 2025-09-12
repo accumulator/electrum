@@ -851,6 +851,8 @@ class BasePlugin(Logger):
                 l.append((self, getattr(self, k)))
                 hooks[k] = l
 
+        self.fs_root = os.path.dirname(sys.modules[self.__module__].__file__)
+
     def __str__(self):
         return self.name
 
