@@ -1536,7 +1536,8 @@ class DeviceMgr(ThreadJob):
         return info
 
     @runs_in_hwd_thread
-    def _scan_devices_with_hid(self) -> List['Device']:
+    def platform_scan_devices(self) -> List['Device']:
+        # platform specific enumerate, will be monkeypatched on android
         try:
             import hid  # noqa: F811
         except ImportError:
@@ -1562,8 +1563,7 @@ class DeviceMgr(ThreadJob):
     def scan_devices(self) -> Sequence['Device']:
         self.logger.info("scanning devices...")
 
-        # First see what's connected that we know about
-        devices = self._scan_devices_with_hid()
+        devices = self.platform_scan_devices()
 
         # Let plugin handlers enumerate devices we don't know about
         with self.lock:
