@@ -278,7 +278,7 @@ class QmlPluginBase(Logger):
     handler_map: Dict[str, 'QmlHandlerBase'] = {}
 
     @hook
-    def load_wallet(self: Union['QmlPluginBase', HW_PluginBase], wallet: 'Abstract_Wallet'):
+    def load_wallet(self: Union['QmlPluginBase', HW_PluginBase], wallet: 'Abstract_Wallet', parent: 'QObject'):
         relevant_keystores = [keystore for keystore in wallet.get_keystores()
                               if isinstance(keystore, self.keystore_class)]
         if not relevant_keystores:
@@ -300,6 +300,7 @@ class QmlPluginBase(Logger):
             # handler.button = button
             # keystore.handler = handler
             # keystore.thread = TaskThread(window, on_error=partial(self.on_task_thread_error, window, keystore))
+            keystore.thread = TaskThread(parent, on_error=self.on_error)
             # self.add_show_address_on_hw_device_button_for_receive_addr(wallet, keystore, window)
         # Trigger pairings
         devmgr = self.device_manager()
@@ -313,6 +314,9 @@ class QmlPluginBase(Logger):
     #     except (UserFacingException, UserCancelled) as e:
     #         exc_info = (type(e), e, e.__traceback__)
     #         self.on_task_thread_error(window=window, keystore=keystore, exc_info=exc_info)
+
+    def on_error(self):
+        raise Exception('qml_hw_plugin.on_error')
 
     def on_task_thread_error(self: Union['QmlPluginBase', HW_PluginBase], window: 'ElectrumQmlApplication',
                              keystore: 'Hardware_KeyStore', exc_info):

@@ -247,7 +247,7 @@ class QEDaemon(AuthMixin, QObject):
                 else:
                     self._logger.info('use single password disabled by config')
 
-                run_hook('load_wallet', wallet)
+                run_hook('load_wallet', wallet, self)
 
                 success = True
                 self._backendWalletLoaded.emit(local_password)
