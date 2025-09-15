@@ -54,12 +54,15 @@ WizardComponent {
                 width: ListView.view.width
                 onClicked: hardwareListView.currentIndex = index
                 RowLayout {
+                    width: parent.width
                     RadioButton {
                         checked: delegate.ListView.isCurrentItem
                     }
 
                     Label {
+                        Layout.fillWidth: true
                         text: model.label
+                        wrapMode: Text.Wrap
                     }
                 }
             }
