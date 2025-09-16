@@ -37,6 +37,16 @@ ElDialog {
             pages.prev()
     }
 
+    function requestNextOrFinish() {
+        // request proceed to next page or finish wizard
+        if (!pages.pagevalid)
+            return
+        if (pages.lastpage)
+            pages.finish()
+        else
+            pages.next()
+    }
+
     function _setWizardData(wdata) {
         wizard_data = {}
         Object.assign(wizard_data, wdata) // deep copy

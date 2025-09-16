@@ -68,6 +68,7 @@ WizardComponent {
         }
         function onPassword_available() {
             root.valid = true
+            wizard.requestNextOrFinish()
         }
     }
 
