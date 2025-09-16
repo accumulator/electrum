@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 class WizardViewState(NamedTuple):
     view: Optional[str]
     wizard_data: Dict[str, Any]
-    params: Dict[str, Any]
+    params: Dict[str, Any] = {}
 
 
 class AbstractWizard:
