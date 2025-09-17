@@ -590,7 +590,7 @@ class BitBox02_KeyStore(Hardware_KeyStore):
     def give_error(self, message: Exception):
         self.logger.info(message)
         if not self.ux_busy:
-            self.handler.show_error(message)
+            self.handler.show_error(str(message))
         else:
             self.ux_busy = False
         raise UserFacingException(message)

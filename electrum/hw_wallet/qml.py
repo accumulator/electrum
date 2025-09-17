@@ -34,7 +34,7 @@ from PyQt6.QtCore import QObject, pyqtSignal, Qt, pyqtSlot, QThread
 from electrum.i18n import _
 from electrum.logging import Logger
 from electrum.util import UserCancelled, UserFacingException, ChoiceItem
-from electrum.plugin import hook, MissingLibrariesException, Device
+from electrum.plugin import hook, MissingLibrariesException, Device, DeviceInfo
 
 from electrum.gui.common_qt.util import TaskThread
 
@@ -157,7 +157,7 @@ class QmlHandlerBase(HardwareHandlerBase, QObject, Logger):
         if self._on_cancel_message:
             self._on_cancel_message()
 
-    def show_error(self, msg, blocking=False):
+    def show_error(self, msg: str, blocking=False):
         self.error_signal.emit(msg)
         # raise Exception('show_error')
         # self.done.clear()
@@ -270,6 +270,18 @@ class QmlHandlerBase(HardwareHandlerBase, QObject, Logger):
         except Exception as e:
             return ''
 
+    @pyqtSlot(result='QVariantMap')
+    def deviceInfo(self):
+        from electrum.gui.qml.qedaemon import QEDaemon
+        client = QEDaemon.instance.plugins.device_manager._client_by_id(self.device)
+        device_info: DeviceInfo = client.get_device_info_for_enumeration()
+        return {
+            'label': device_info.label,
+            'soft_device_id': device_info.soft_device_id,
+            'model_name': device_info.model_name,
+            'plugin_name': device_info.plugin_name,
+        }
+
 
 class QmlPluginBase(Logger):
     handler_class: Type['QmlHandlerBase']
@@ -281,6 +293,7 @@ class QmlPluginBase(Logger):
     def load_wallet(self: Union['QmlPluginBase', HW_PluginBase], wallet: 'Abstract_Wallet', parent: 'QObject'):
         relevant_keystores = [keystore for keystore in wallet.get_keystores()
                               if isinstance(keystore, self.keystore_class)]
+        self.logger.info(f'thread: {threading.current_thread().name}')
         if not relevant_keystores:
             return
         for keystore in relevant_keystores:
@@ -288,20 +301,26 @@ class QmlPluginBase(Logger):
                 message = keystore.plugin.get_library_not_available_message()
                 raise MissingLibrariesException(message)
 
-            # tooltip = self.device + '\n' + (keystore.label or 'unnamed')
-            # cb = partial(self._on_status_bar_button_click, window=window, keystore=keystore)
-            # sb = window.statusBar()
-            # icon = read_QIcon_from_bytes(self.read_file(self.icon_unpaired))
-            # button = StatusBarButton(icon, tooltip, cb, sb.height())
-            # button.icon_paired = self.read_file(self.icon_paired)
-            # button.icon_unpaired = self.read_file(self.icon_unpaired)
-            # sb.addPermanentWidget(button)
-            # handler = self.create_handler(window)
-            # handler.button = button
-            # keystore.handler = handler
+            client = None
+            # keystore -> client -> handler
+            # keystore has soft_device_id, match against
+            devmgr = keystore.plugin.device_manager()
+            # client = devmgr.client_by_pairing_code(pairing_code=keystore.pairing_code(), plugin=keystore.plugin, handler=None, devices=None)
+            for client_, id_ in devmgr.clients.items():
+                if not client_.is_paired():
+                    continue
+                pcc = client_.get_pairing_code()
+                if pcc == keystore.pairing_code():
+                    client = client_
+
+            if not client:
+                self.logger.warning('no suitable client for keystore found')
+                return
+
+            keystore.handler = client.handler
             # keystore.thread = TaskThread(window, on_error=partial(self.on_task_thread_error, window, keystore))
             keystore.thread = TaskThread(parent, on_error=self.on_error)
-            # self.add_show_address_on_hw_device_button_for_receive_addr(wallet, keystore, window)
+
         # Trigger pairings
         devmgr = self.device_manager()
         trigger_pairings = partial(devmgr.trigger_pairings, relevant_keystores, allow_user_interaction=True)

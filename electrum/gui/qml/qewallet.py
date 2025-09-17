@@ -419,6 +419,7 @@ class QEWallet(AuthMixin, QObject, QtEventListener):
                 'master_pubkey': (k.get_master_public_key() if k.is_deterministic() else '') or '',
                 'fingerprint': (k.get_root_fingerprint() if k.is_deterministic() else '') or '',
                 'num_imported': len(k.keypairs) if k.can_import() else 0,
+                'hww_pairing_code': k.pairing_code() if k.type == 'hardware' else '',
             })
         return result
 
@@ -547,45 +548,48 @@ class QEWallet(AuthMixin, QObject, QtEventListener):
         self.do_sign(tx, False, on_success, on_failure)
 
     def do_sign(self, tx, broadcast, on_success: Callable[[Transaction], None] = None, on_failure: Callable[[Optional[Any]], None] = None):
-        # tc_sign_wrapper is only used by 2fa. don't pass on_failure handler, it is handled via otpFailed signal
-        sign_hook = run_hook('tc_sign_wrapper', self.wallet, tx,
-                             partial(self.on_sign_complete, broadcast, on_success),
-                             partial(self.on_sign_failed, None))
-        try:
-            # ignore_warnings=True, because UI checks and asks user confirmation itself
-            tx = self.wallet.sign_transaction(tx, self.password, ignore_warnings=True)
-        except BaseException as e:
-            self._logger.error(f'{e!r}')
-            if on_failure:
-                on_failure(str(e))
-            return
+        def sign_task(tx_, broadcast_, on_success_, on_failure_):
+            # tc_sign_wrapper is only used by 2fa. don't pass on_failure handler, it is handled via otpFailed signal
+            sign_hook = run_hook('tc_sign_wrapper', self.wallet, tx_,
+                                 partial(self.on_sign_complete, broadcast_, on_success_),
+                                 partial(self.on_sign_failed, None))
+            try:
+                # ignore_warnings=True, because UI checks and asks user confirmation itself
+                tx_ = self.wallet.sign_transaction(tx_, self.password, ignore_warnings=True)
+            except BaseException as e:
+                self._logger.error(f'{e!r}')
+                if on_failure_:
+                    on_failure_(str(e))
+                return
 
-        if tx is None:
-            self._logger.info('did not sign')
-            if on_failure:
-                on_failure()
-            return
+            if tx_ is None:
+                self._logger.info('did not sign')
+                if on_failure_:
+                    on_failure_()
+                return
 
-        if sign_hook:
-            self._logger.debug('plugin needs to sign tx too')
-            sign_hook(tx)
-            return
+            if sign_hook:
+                self._logger.debug('plugin needs to sign tx too')
+                sign_hook(tx_)
+                return
 
-        txid = tx.txid()
-        self._logger.debug(f'do_sign(), txid={txid}')
+            txid = tx_.txid()
+            self._logger.debug(f'do_sign(), txid={txid}')
 
-        if not tx.is_complete():
-            self._logger.debug('tx not complete')
-            broadcast = False
+            if not tx_.is_complete():
+                self._logger.debug('tx not complete')
+                broadcast_ = False
 
-        if broadcast:
-            self.broadcast(tx)
-        else:
-            # not broadcasted, so refresh history here
-            self.historyModel.initModel(True)
+            if broadcast_:
+                self.broadcast(tx_)
+            else:
+                # not broadcasted, so refresh history here
+                self.historyModel.initModel(True)
 
-        if on_success:
-            on_success(tx)
+            if on_success_:
+                on_success_(tx_)
+
+        threading.Thread(target=sign_task, args=(tx, broadcast, on_success, on_failure), daemon=True).start()
 
     # this assumes a 2fa wallet, but there are no other tc_sign_wrapper hooks, so that's ok
     def on_sign_complete(self, broadcast, cb: Callable[[Transaction], None] = None, tx: Transaction = None):

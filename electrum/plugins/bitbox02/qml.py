@@ -1,15 +1,17 @@
+import threading
 from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import pyqtSignal, QObject
 
 from electrum.i18n import _
+from electrum.plugin import runs_in_hwd_thread
 from electrum.gui.qml.qewizard import QENewWalletWizard
 from electrum.hw_wallet.qml import QmlHandlerBase, QmlPluginBase
 
-from .bitbox02 import BitBox02Plugin
+from .bitbox02 import BitBox02Plugin, BitBox02Client
 
 if TYPE_CHECKING:
-    from electrum.hw_wallet import HW_PluginBase
+    from electrum.plugin import Device
 
 
 class BitBox02Handler(QmlHandlerBase):
@@ -26,6 +28,13 @@ class Plugin(BitBox02Plugin, QmlPluginBase):
 
     def create_handler(self, device_uid: str, parent: QObject = None) -> QmlHandlerBase:
         return QmlPluginBase.create_handler(self, device_uid, parent)
+
+    @runs_in_hwd_thread
+    def create_client(self, device_descriptor: 'Device', handler) -> BitBox02Client:
+        self.logger.info(f'thread: {threading.current_thread().name}')
+        # if handler is None:
+        #     handler = self.create_handler(device_descriptor.id_)
+        return BitBox02Client(handler, device_descriptor, self.config, plugin=self)
 
     # insert bitbox02 pages in new wallet wizard
     def extend_wizard(self, wizard: 'QENewWalletWizard'):

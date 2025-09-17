@@ -280,6 +280,13 @@ class HardwareClientBase(ABC):
             model_name=self.device_model_name()
         )
 
+    def get_pairing_code(self):
+        assert self.is_paired()
+        sdid = self.get_soft_device_id()
+        if not sdid:
+            return None
+        return f"{self.plugin.name}/{sdid}"
+
     @abstractmethod
     def has_usable_connection_with_device(self) -> bool:
         pass
