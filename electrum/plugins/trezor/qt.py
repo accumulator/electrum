@@ -810,7 +810,7 @@ class WCTrezorXPub(WCHWXPub):
 
     def get_xpub_from_client(self, client, derivation, xtype):
         current_cosigner = self.wizard.current_cosigner(self.wizard_data)
-        _name, _info = current_cosigner['hardware_device']
+        _info = client.get_device_info_for_enumeration()
         if xtype not in self.plugin.SUPPORTED_XTYPES:
             raise ScriptTypeNotSupported(_('This type of script is not supported with {}').format(_info.model_name))
         if not client.is_uptodate():
@@ -830,10 +830,10 @@ class WCTrezorInitMethod(WalletWizardComponent, Logger):
 
     def on_ready(self):
         current_cosigner = self.wizard.current_cosigner(self.wizard_data)
-        _name, _info = current_cosigner['hardware_device']
-        self.plugin = self.plugins.get_plugin(_info.plugin_name)
-        device_id = _info.device.id_
+        device_id = current_cosigner['hardware_uid']
         client = self.plugins.device_manager.client_by_id(device_id, scan_now=False)
+        self.plugin = client.plugin
+        _info = client.get_device_info_for_enumeration()
         if client.features.bootloader_mode:
             msg = (_("Looks like your device is in bootloader mode. Try reconnecting it.\n"
                      "If you haven't installed a firmware on it yet, you can download it from {}")
@@ -874,8 +874,8 @@ class WCTrezorInitParams(WalletWizardComponent):
 
     def on_ready(self):
         current_cosigner = self.wizard.current_cosigner(self.wizard_data)
-        _name, _info = current_cosigner['hardware_device']
-        self.settings_layout = InitSettingsLayout(self.plugins.device_manager, current_cosigner['trezor_init'], _info.device.id_)
+        device_id = current_cosigner['hardware_uid']
+        self.settings_layout = InitSettingsLayout(self.plugins.device_manager, current_cosigner['trezor_init'], device_id)
         self.layout().addLayout(self.settings_layout)
         self.layout().addStretch(1)
 
@@ -902,8 +902,7 @@ class WCTrezorInit(WalletWizardComponent, Logger):
         current_cosigner = self.wizard.current_cosigner(self.wizard_data)
         settings = current_cosigner['trezor_settings']
         method = current_cosigner['trezor_init']
-        _name, _info = current_cosigner['hardware_device']
-        device_id = _info.device.id_
+        device_id = current_cosigner['hardware_uid']
         client = self.plugins.device_manager.client_by_id(device_id, scan_now=False)
         client.handler = self.plugin.create_handler(self.wizard)
 
@@ -939,16 +938,14 @@ class WCTrezorPair(WalletWizardComponent, Logger):
 
     def on_ready(self):
         current_cosigner = self.wizard.current_cosigner(self.wizard_data)
-        _name, _info = current_cosigner['hardware_device']
-        self.plugin = self.plugins.get_plugin(_info.plugin_name)
-
-        device_id = _info.device.id_
+        device_id = current_cosigner['hardware_uid']
         client = self.plugins.device_manager.client_by_id(device_id, scan_now=False)
         if client is None:
             self.error = _("Client for hardware device was unpaired.")
             self.busy = False
             return
 
+        self.plugin = client.plugin
         client.handler = self.plugin.create_handler(self.wizard)
 
         def pair_task(client):

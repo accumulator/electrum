@@ -44,6 +44,15 @@ class DaemonMock:
         self.network = NetworkMock()
 
 
+class HardwareClientMock:
+    def __init__(self, plugin, device_info: DeviceInfo):
+        self.plugin = plugin
+        self.device_info = device_info
+
+    def get_device_info_for_enumeration(self) -> DeviceInfo:
+        return self.device_info
+
+
 class TNewWalletWizard(NewWalletWizard):
     def is_single_password(self):
         """impl abstract reqd"""
@@ -68,6 +77,20 @@ class WizardTestCase(ElectrumTestCase):
         self.plugins.stop()
         self.plugins.stopped_event.wait()
         super().tearDown()
+
+    def _mock_trezor_device(self) -> str:
+        """Lets the DeviceMgr return a client for a connected Trezor. Returns its device id."""
+        device_info = DeviceInfo(
+            device=Device(path='webusb:002:1', interface_number=-1, id_='webusb:002:1', product_key='Trezor', usage_page=0, transport_ui_string='webusb:002:1'),
+            label='trezor_unittests', initialized=True, exception=None, plugin_name='trezor', soft_device_id='088C3F260B66F60E15DE0FA5', model_name='Trezor T')
+        client = HardwareClientMock(self.plugins.get_plugin('trezor'), device_info)
+
+        def client_by_id(id_, *, scan_now=True):
+            return client if id_ == device_info.device.id_ else None
+        patcher = mock.patch.object(self.plugins.device_manager, 'client_by_id', new=client_by_id)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return device_info.device.id_
 
 
 class ServerConnectWizardTestCase(WizardTestCase):
@@ -488,12 +511,7 @@ class KeystoreWizardTestCase(WizardTestCase):
         w, v = self._wizard_for(hww=True)
         d = v.wizard_data
         myxpub = 'zpub6rakEaM5ps5UiQ2yhbWiEkd6ceJfmuzegwc62G4itMz8L7rRFRqh6y8bTCScXV6NfTMUhANYQnfqfBd9dYfBRKf4LD1Yyfc8UvwY1MtNKWs'
-        d.update({
-            'hardware_device': (
-                'trezor',
-                DeviceInfo(
-                    device=Device(path='webusb:002:1', interface_number=-1, id_='webusb:002:1', product_key='Trezor', usage_page=0, transport_ui_string='webusb:002:1'),
-                    label='trezor_unittests', initialized=True, exception=None, plugin_name='trezor', soft_device_id='088C3F260B66F60E15DE0FA5', model_name='Trezor T'))})
+        d.update({'hardware_uid': self._mock_trezor_device()})
         v = w.resolve_next(v.view, d)
         self.assertEqual('trezor_start', v.view)
         d.update({
@@ -1149,12 +1167,7 @@ class WalletWizardTestCase(WizardTestCase):
         v = w.resolve_next(v.view, d)
         self.assertEqual('choose_hardware_device', v.view)
 
-        d.update({
-            'hardware_device': (
-                'trezor',
-                DeviceInfo(
-                    device=Device(path='webusb:002:1', interface_number=-1, id_='webusb:002:1', product_key='Trezor', usage_page=0, transport_ui_string='webusb:002:1'),
-                    label='trezor_unittests', initialized=True, exception=None, plugin_name='trezor', soft_device_id='088C3F260B66F60E15DE0FA5', model_name='Trezor T'))})
+        d.update({'hardware_uid': self._mock_trezor_device()})
         v = w.resolve_next(v.view, d)
         self.assertEqual('trezor_start', v.view)
 
@@ -1194,12 +1207,7 @@ class WalletWizardTestCase(WizardTestCase):
         v = w.resolve_next(v.view, d)
         self.assertEqual('hw_unlock', v.view)
 
-        d.update({
-            'hardware_device': (
-                'trezor',
-                DeviceInfo(
-                    device=Device(path='webusb:002:1', interface_number=-1, id_='webusb:002:1', product_key='Trezor', usage_page=0, transport_ui_string='webusb:002:1'),
-                    label='trezor_unittests', initialized=True, exception=None, plugin_name='trezor', soft_device_id='088C3F260B66F60E15DE0FA5', model_name='Trezor T'))})
+        d.update({'hardware_uid': self._mock_trezor_device()})
         v = w.resolve_next(v.view, d)
         self.assertEqual('trezor_unlock', v.view)
 
@@ -1305,12 +1313,7 @@ class WalletWizardTestCase(WizardTestCase):
         v = w.resolve_next(v.view, d)
         self.assertEqual('multisig_cosigner_hardware', v.view)
 
-        d['multisig_cosigner_data']['4'].update({
-            'hardware_device': (
-                'trezor',
-                DeviceInfo(
-                    device=Device(path='webusb:002:1', interface_number=-1, id_='webusb:002:1', product_key='Trezor', usage_page=0, transport_ui_string='webusb:002:1'),
-                    label='trezor_unittests', initialized=True, exception=None, plugin_name='trezor', soft_device_id='088C3F260B66F60E15DE0FA5', model_name='Trezor T'))})
+        d['multisig_cosigner_data']['4'].update({'hardware_uid': self._mock_trezor_device()})
         v = w.resolve_next(v.view, d)
         self.assertEqual('trezor_start', v.view)
 
