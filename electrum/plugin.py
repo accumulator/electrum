@@ -1309,18 +1309,51 @@ class DeviceMgr(ThreadJob):
             self._close_client(id_)
 
     def _close_client(self, id_):
+        if client := self._forget_client(id_):
+            self._try_close_client(client)
+
+    def _forget_client(self, id_) -> Optional['HardwareClientBase']:
         with self.lock:
             client = self._client_by_id(id_)
             self.clients.pop(client, None)
             if fut := self._ongoing_timeout_checks.pop(id_, None):
                 fut.cancel()
-        if client:
+        return client
+
+    def _try_close_client(self, client: 'HardwareClientBase'):
+        try:
+            client.close()
+        except Exception as e:
+            # closing is best-effort: it does device I/O, which can fail,
+            # e.g. if the device was unplugged
+            self.logger.info(f"failed to close hardware client cleanly: {e!r}")
+
+    def on_device_removed(self, id_: str) -> None:
+        """Invalidates the client of a device that is gone, e.g. unplugged.
+        Meant for device-removal notifications: it can be called from any thread, and it does
+        not wait for the hwd thread, which may still be busy with an operation on the device."""
+        self.logger.info(f"device removed: {id_}")
+        # unpair and forget it right away, so that nothing picks it up anymore
+        with self.lock:
+            if pairing_code := self.pairing_code_by_id(id_):
+                del self.pairing_code_to_id[pairing_code]
+            client = self._forget_client(id_)
+        if not client:
+            return
+        if threading.current_thread().name.startswith("hwd_comms_thread"):
+            # e.g. in scan_devices: no operation can be in progress, and abort() must not be called here.
+            # Close right away, so that the device is free when the caller continues, e.g. when
+            # client_for_keystore creates a new client for it in the same hwd task.
+            self._try_close_client(client)
+        else:
             try:
-                client.close()
+                client.abort()  # make an operation in progress on the device give up
             except Exception as e:
-                # closing is best-effort: it does device I/O, which can fail,
-                # e.g. if the device was unplugged
-                self.logger.info(f"failed to close hardware client cleanly: {e!r}")
+                self.logger.info(f"failed to abort the operation on the removed device: {e!r}")
+            # closing does device I/O: queue it on the hwd thread instead of waiting for it
+            _hwd_comms_executor.submit(self._try_close_client, client)
+        if client.handler:
+            client.handler.update_status(False)
 
     def _client_by_id(self, id_) -> Optional['HardwareClientBase']:
         with self.lock:
@@ -1578,21 +1611,11 @@ class DeviceMgr(ThreadJob):
 
         # find out what was disconnected
         client_ids = [dev.id_ for dev in devices]
-        disconnected_clients = []
         with self.lock:
-            connected = {}
-            for client, id_ in self.clients.items():
-                if id_ in client_ids and client.has_usable_connection_with_device():
-                    connected[client] = id_
-                else:
-                    disconnected_clients.append((client, id_))
-            self.clients = connected
-
-        # Unpair disconnected devices
-        for client, id_ in disconnected_clients:
-            self.unpair_id(id_)
-            if client.handler:
-                client.handler.update_status(False)
+            disconnected_ids = [id_ for client, id_ in self.clients.items()
+                                if id_ not in client_ids or not client.has_usable_connection_with_device()]
+        for id_ in disconnected_ids:
+            self.on_device_removed(id_)
 
         return devices
 
