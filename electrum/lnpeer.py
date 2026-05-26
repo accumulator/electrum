@@ -2129,15 +2129,21 @@ class Peer(Logger, EventListener):
         if htlc.blinding:  # payment over blinded path
             # spec: MUST return an error if the payload contains other tlv fields than encrypted_recipient_data,
             # current_path_key, amt_to_forward, outgoing_cltv_value and total_amount_msat.
-            assert all(x in ['encrypted_recipient_data', 'current_blinding_point', 'amt_to_forward', 'outgoing_cltv_value', 'total_amount_msat']
-                       for x in processed_onion.hop_data.payload.keys())
+            allowed_payload_keys = {
+                'encrypted_recipient_data', 'current_blinding_point',
+                'amt_to_forward', 'outgoing_cltv_value', 'total_amount_msat',
+            }
+            if not all(x in allowed_payload_keys for x in processed_onion.hop_data.payload.keys()):
+                log_fail_reason(f"unexpected tlv fields in blinded payload")
+                raise exc_incorrect_or_unknown_pd
             recipient_data = processed_onion.blinded_path_recipient_data
             path_id = recipient_data.get('path_id', {}).get('data')
             if not path_id:
                 log_fail_reason(f"'path_id' missing in recipient_data")
                 raise exc_incorrect_or_unknown_pd
 
-            if path_id not in self.lnworker._pathids[htlc.payment_hash]:
+            known_path_ids = self.lnworker._pathids.get(htlc.payment_hash)
+            if not known_path_ids or path_id not in known_path_ids:
                 log_fail_reason(f"unknown path_id for payment_hash")
                 raise exc_incorrect_or_unknown_pd
 
