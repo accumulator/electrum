@@ -3310,7 +3310,7 @@ class Peer(Logger, EventListener):
             blinding: bytes = None,
             is_trampoline: bool = False) -> ProcessedOnionPacket:
         onion_hash = onion_packet.onion_hash
-        cache_key = sha256(onion_hash + payment_hash + bytes([is_trampoline]))  # type: ignore
+        cache_key = sha256(onion_hash + payment_hash + bytes([is_trampoline]) + (blinding or b''))  # type: ignore
         if cached_onion := self._processed_onion_cache.get(cache_key):
             return cached_onion
 
