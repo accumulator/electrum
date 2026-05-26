@@ -69,7 +69,7 @@ class WalletUnfinished(WalletFileException):
 # seed_version is now used for the version of the wallet file
 OLD_SEED_VERSION = 4        # electrum versions < 2.0
 NEW_SEED_VERSION = 11       # electrum versions >= 2.0
-FINAL_SEED_VERSION = 66     # electrum >= 2.7 will set this to prevent
+FINAL_SEED_VERSION = 67     # electrum >= 2.7 will set this to prevent
                             # old versions from overwriting new format
 
 
@@ -238,6 +238,7 @@ class WalletDBUpgrader(Logger):
         self._convert_version_64()
         self._convert_version_65()
         self._convert_version_66()
+        self._convert_version_67()
         self.put('seed_version', FINAL_SEED_VERSION)  # just to be sure
 
     def _convert_wallet_type(self):
@@ -1331,6 +1332,16 @@ class WalletDBUpgrader(Logger):
 
         self.data['lightning_payments'] = new_payment_infos
         self.data['seed_version'] = 66
+
+    def _convert_version_67(self):
+        """UpdateAddHtlc storage tuple gained a trailing 'blinding' field for BOLT12 route-blinding.
+        Existing 5-tuples remain readable thanks to the default arg in UpdateAddHtlc.from_tuple, but
+        the version bump prevents older clients (which only accept 5-tuples) from silently opening
+        wallets that may now contain 6-tuple entries.
+        """
+        if not self._is_upgrade_method_needed(66, 66):
+            return
+        self.data['seed_version'] = 67
 
     def _convert_imported(self):
         if not self._is_upgrade_method_needed(0, 13):
