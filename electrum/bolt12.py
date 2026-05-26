@@ -182,14 +182,22 @@ def to_lnaddr(data: dict) -> LnAddr:
     # NOTE: CLN puts the real node_id here, which is defeats the whole purpose of blinded paths
     # also, this should not be used as routing destination in payments (introduction point in set of blinded paths
     # must be used instead
-    pubkey = data.get('invoice_node_id').get('node_id')
+    for required in ('invoice_node_id', 'invoice_created_at', 'invoice_payment_hash'):
+        if not isinstance(data.get(required), dict):
+            raise Bolt12InvoiceError(f'malformed bolt12 invoice: missing required field {required!r}')
+    try:
+        pubkey = data['invoice_node_id']['node_id']
+        timestamp = data['invoice_created_at']['timestamp']
+        payment_hash = data['invoice_payment_hash']['payment_hash']
+    except KeyError as e:
+        raise Bolt12InvoiceError(f'malformed bolt12 invoice: missing inner field {e!r}') from e
 
     class WrappedBytesKey:
         serialize = lambda: pubkey
     addr.pubkey = WrappedBytesKey
     addr.net = net
-    addr.date = data.get('invoice_created_at').get('timestamp')
-    addr.paymenthash = data.get('invoice_payment_hash').get('payment_hash')
+    addr.date = timestamp
+    addr.paymenthash = payment_hash
     addr.payment_secret = b'\x00' * 32  # Note: payment secret is not needed, recipient can use path_id in encrypted_recipient_data
     msat = data.get('invoice_amount', {}).get('msat', None)
     if msat is not None:
