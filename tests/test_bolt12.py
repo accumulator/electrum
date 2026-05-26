@@ -353,6 +353,43 @@ class TestBolt12(ElectrumTestCase):
         }, signing_key)
         decode_invoice(invoice_tlv)
 
+    def test_to_lnaddr_with_fallbacks(self):
+        # regression: invoice_fallbacks subtype is a dict {'fallbacks': [..]}, and
+        # subtype 'version' is a 1-byte 'bytes' object, not an int.
+        signing_pubkey = privkey_to_pubkey(
+            bfh('4141414141414141414141414141414141414141414141414141414141414141'))
+        payment_hash = bytes(32)
+        invoice_data = {
+            'invoice_node_id': {'node_id': signing_pubkey},
+            'invoice_created_at': {'timestamp': 1700000000},
+            'invoice_payment_hash': {'payment_hash': payment_hash},
+            'invoice_amount': {'msat': 1234},
+            'invoice_relative_expiry': {'seconds_from_creation': 3600},
+            'offer_description': {'description': 'with fallbacks'},
+            'invoice_features': {'features': b'\x00'},
+            'invoice_fallbacks': {'fallbacks': [
+                {'version': b'\x00', 'address': b'\x01' * 20},  # accepted
+                {'version': b'\xff', 'address': b'\x01' * 20},  # rejected: version>16
+                {'version': b'\x00', 'address': b'\x01'},       # rejected: addr too short
+            ]},
+        }
+        addr = bolt12.to_lnaddr(invoice_data)
+        fallback_tags = [t for t in addr.tags if t[0] == 'f']
+        self.assertEqual(len(fallback_tags), 1)
+        self.assertEqual(fallback_tags[0][1]['version'], b'\x00')
+
+    def test_to_lnaddr_no_fallbacks(self):
+        signing_pubkey = privkey_to_pubkey(
+            bfh('4141414141414141414141414141414141414141414141414141414141414141'))
+        invoice_data = {
+            'invoice_node_id': {'node_id': signing_pubkey},
+            'invoice_created_at': {'timestamp': 1700000000},
+            'invoice_payment_hash': {'payment_hash': bytes(32)},
+            'invoice_amount': {'msat': 1234},
+        }
+        addr = bolt12.to_lnaddr(invoice_data)
+        self.assertEqual([t for t in addr.tags if t[0] == 'f'], [])
+
     def test_serde_complex_fields(self):
         payer_key = bfh('4141414141414141414141414141414141414141414141414141414141414141')
 

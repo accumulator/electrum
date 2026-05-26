@@ -194,8 +194,12 @@ def to_lnaddr(data: dict) -> LnAddr:
     msat = data.get('invoice_amount', {}).get('msat', None)
     if msat is not None:
         addr.amount = Decimal(msat) / COIN / 1000
-    fallbacks = data.get('invoice_fallbacks', [])
-    fallbacks = list(filter(lambda x: x['version'] <= 16 and 2 <= len(x['address'] <= 40), fallbacks))
+    fallbacks = data.get('invoice_fallbacks', {}).get('fallbacks', [])
+    # `version` is decoded as a 1-byte `bytes` object by the lnmsg subtype parser
+    fallbacks = [
+        fb for fb in fallbacks
+        if fb['version'][0] <= 16 and 2 <= len(fb['address']) <= 40
+    ]
     if fallbacks:
         addr.tags.append(('f', fallbacks[0]))
     exp = data.get('invoice_relative_expiry', {}).get('seconds_from_creation', 0)
