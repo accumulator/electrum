@@ -1,13 +1,41 @@
+#!/usr/bin/env python
+#
+# Electrum - lightweight Bitcoin client
+# Copyright (C) 2026 The Electrum Developers
+#
+# Permission is hereby granted, free of charge, to any person
+# obtaining a copy of this software and associated documentation files
+# (the "Software"), to deal in the Software without restriction,
+# including without limitation the rights to use, copy, modify, merge,
+# publish, distribute, sublicense, and/or sell copies of the Software,
+# and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be
+# included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+# BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+# ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 import asyncio
 from asyncio import Future
-from typing import Optional, Union, Callable
+from typing import Optional, Union, Callable, TYPE_CHECKING
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import pyqtSignal, pyqtProperty
 
 from electrum import get_logger
 from electrum.gui.common_qt.util import qt_event_listener, QtEventListener
 from electrum.submarine_swaps import SwapServerTransport, HttpTransport, NostrTransport
 from electrum.util import get_asyncio_loop, wait_for2
+
+if TYPE_CHECKING:
+    from electrum.wallet import Abstract_Wallet
 
 
 class SubmarineSwapMixin(QtEventListener):
@@ -21,15 +49,24 @@ class SubmarineSwapMixin(QtEventListener):
         self.create_sm_transport = create_sm_transport
         self.swap_manager = None
         self.swap_transport = None  # type: Optional[SwapServerTransport]
-        # self.swapAvailabilityChanged.connect(self.on_swap_availability_changed, Qt.ConnectionType.QueuedConnection)
         self.ongoing_swap_transport_connection_attempt = None  # type: Optional[Future]
+        self._swapStatusMsg = ''
 
-    def set_wallet_for_swap(self, wallet):
+    swapStatusMsgChanged = pyqtSignal()
+    @pyqtProperty(str, notify=swapStatusMsgChanged)
+    def swapStatusMsg(self):
+        return self._swapStatusMsg
+
+    @swapStatusMsg.setter
+    def swapStatusMsg(self, swap_status_msg: str):
+        if self._swapStatusMsg != swap_status_msg:
+            self._swapStatusMsg = swap_status_msg
+            self.swapStatusMsgChanged.emit()
+
+    def set_wallet_for_swap(self, wallet: 'Abstract_Wallet'):
         self.swap_wallet = wallet
         self.config = wallet.config
         self.swap_manager = wallet.lnworker.swap_manager if wallet.has_lightning() else None
-        if self.swap_manager and not self.create_sm_transport:
-            self.create_sm_transport = self.swap_manager.create_transport
 
     # --- Shared functionality for submarine swaps (change to ln and submarine payments) ---
     def prepare_swap_transport(self):
@@ -46,14 +83,18 @@ class SubmarineSwapMixin(QtEventListener):
         # a useless transport should get cleaned up and not stored.
         assert self.swap_transport is None, "swap transport wasn't cleaned up properly"
 
-        new_swap_transport = self.create_sm_transport()
+        new_swap_transport = self.create_sm_transport() if self.create_sm_transport \
+            else self.swap_manager.create_transport()
+
         if not new_swap_transport:
-            # user declined to enable Nostr and has no http server configured
+            # could not create transport, e.g. user declined to enable Nostr and has no http server configured
+            self._swaps_logger.debug('could not create swap transport')
             self.swapAvailabilityChanged.emit()
             return
 
         async def _initialize_transport(transport):
             try:
+                self.swapStatusMsg = 'initializing swap transport'
                 if isinstance(transport, NostrTransport):
                     asyncio.create_task(transport.main_loop())
                 else:
@@ -61,8 +102,10 @@ class SubmarineSwapMixin(QtEventListener):
                     asyncio.create_task(transport.get_pairs_just_once())
                 if not await self.wait_for_swap_transport(transport):
                     return
+                self.swapStatusMsg = 'swap transport initialized'
                 self.swap_transport = transport
             except Exception:
+                self.swapStatusMsg = 'failed initializing swap transport'
                 self._swaps_logger.exception("failed to create swap transport")
             finally:
                 self.ongoing_swap_transport_connection_attempt = None
