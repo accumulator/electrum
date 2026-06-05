@@ -30,7 +30,9 @@ from typing import Optional, Union, Callable, TYPE_CHECKING
 from PyQt6.QtCore import pyqtSignal, pyqtProperty
 
 from electrum import get_logger
+from electrum.bitcoin import DummyAddress
 from electrum.gui.common_qt.util import qt_event_listener, QtEventListener
+from electrum.i18n import _
 from electrum.submarine_swaps import SwapServerTransport, HttpTransport, NostrTransport
 from electrum.util import get_asyncio_loop, wait_for2
 
@@ -67,6 +69,41 @@ class SubmarineSwapMixin(QtEventListener):
         self.swap_wallet = wallet
         self.config = wallet.config
         self.swap_manager = wallet.lnworker.swap_manager if wallet.has_lightning() else None
+
+    def get_message_for_swap_change(self, tx):
+        msg = ''
+        if self.ongoing_swap_transport_connection_attempt:
+            msg = _("Fetching submarine swap providers...")
+        elif dummy_output := tx.get_dummy_output(DummyAddress.SWAP):
+            msg = _('Will send change to lightning')
+            if self.swap_manager and self.swap_manager.is_initialized.is_set() and isinstance(dummy_output.value, int):
+                ln_amount_we_recv = self.swap_manager.get_recv_amount(send_amount=dummy_output.value,
+                                                                      is_reverse=False)
+                if ln_amount_we_recv:
+                    swap_fees = dummy_output.value - ln_amount_we_recv
+                    msg += " [" + _("Swap fees:") + " " + self.config.format_amount_and_units(swap_fees) + "]."
+        elif not tx.has_change():
+            msg = _('No change output, so no need for swap')
+        else:
+            change_amount = sum(c.value for c in tx.get_change_outputs() if isinstance(c.value, int))
+            if not self.swap_wallet.has_lightning():
+                msg = _("Lightning is not enabled.")
+            elif change_amount > int(self.swap_wallet.lnworker.num_sats_can_receive()):
+                msg = _("Your channels cannot receive this amount.")
+            elif self.swap_wallet.lnworker.swap_manager.is_initialized.is_set():
+                min_amount = self.swap_wallet.lnworker.swap_manager.get_min_amount()
+                max_amount = self.swap_wallet.lnworker.swap_manager.get_provider_max_reverse_amount()
+                if change_amount < min_amount:
+                    msg = _("Below the swap providers minimum value of {}.").format(
+                        self.config.format_amount_and_units(min_amount)
+                    )
+                elif change_amount > max_amount:
+                    msg = _('Change amount exceeds the swap providers maximum value of {}.').format(
+                        self.config.format_amount_and_units(max_amount)
+                    )
+            else:
+                msg = _('Will not send change to Lightning')
+        return msg
 
     # --- Shared functionality for submarine swaps (change to ln and submarine payments) ---
     def prepare_swap_transport(self):
