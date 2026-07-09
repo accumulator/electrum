@@ -1,6 +1,7 @@
 package org.electrum.qr;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.os.Bundle;
 import android.os.Build;
 import android.util.Log;
@@ -10,11 +11,16 @@ import android.content.ClipData;
 import android.content.ClipDescription;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.pm.PackageManager;
+import android.text.InputType;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
+import android.view.WindowManager;
 import android.widget.Button;
+import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -70,6 +76,46 @@ public class SimpleScannerActivity extends Activity {
                 }
             }
         });
+
+        // bind "enter manually" button
+        String manualLabel = intent.getStringExtra("manual_entry_label");
+        String manualTitleExtra = intent.getStringExtra("manual_entry_title");
+        final String manualTitle = manualTitleExtra != null ? manualTitleExtra : "Enter payment identifier";
+        Button manualBtn = (Button) findViewById(R.id.manual_btn);
+        if (manualLabel != null) {
+            manualBtn.setText(manualLabel);
+        }
+        manualBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                final EditText input = new EditText(SimpleScannerActivity.this);
+                input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+                // pad the input so it isn't flush against the dialog edges
+                FrameLayout container = new FrameLayout(SimpleScannerActivity.this);
+                int pad = Math.round(20 * getResources().getDisplayMetrics().density);
+                container.setPadding(pad, pad / 2, pad, 0);
+                container.addView(input);
+                AlertDialog dialog = new AlertDialog.Builder(SimpleScannerActivity.this)
+                        .setTitle(manualTitle)
+                        .setView(container)
+                        .setPositiveButton(android.R.string.ok, new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface d, int which) {
+                                String enteredText = input.getText().toString().trim();
+                                if (!enteredText.isEmpty()) {
+                                    SimpleScannerActivity.this.setResultAndClose(null, enteredText);
+                                }
+                            }
+                        })
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .create();
+                if (dialog.getWindow() != null) {
+                    dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
+                }
+                dialog.show();
+            }
+        });
+
         setupEdgeToEdge();
     }
 
@@ -198,12 +244,12 @@ public class SimpleScannerActivity extends Activity {
                 );
             }
 
-            // Apply bottom margin to paste button for navigation bar
-            Button pasteButton = findViewById(R.id.paste_btn);
-            if (pasteButton != null) {
-                ViewGroup.MarginLayoutParams params = (ViewGroup.MarginLayoutParams) pasteButton.getLayoutParams();
+            // Apply bottom margin to button bar for navigation bar
+            View buttonBar = findViewById(R.id.button_bar);
+            if (buttonBar != null) {
+                ViewGroup.MarginLayoutParams params = (ViewGroup.MarginLayoutParams) buttonBar.getLayoutParams();
                 params.bottomMargin = systemBars.bottom;
-                pasteButton.setLayoutParams(params);
+                buttonBar.setLayoutParams(params);
             }
 
             return insets;
