@@ -56,6 +56,8 @@ class QEQRScanner(QObject):
         intent = jIntent(jpythonActivity, jSimpleScannerActivity)
         intent.putExtra(jIntent.EXTRA_TEXT, jString(self._hint))
         intent.putExtra('allow_screenshots', QEConfig.instance.config.GUI_QML_ALWAYS_ALLOW_SCREENSHOTS)
+        intent.putExtra("manual_entry_label", jString(_("Enter manually") + " ✏️"))
+        intent.putExtra("manual_entry_title", jString(_("Enter payment identifier")))
 
         activity.bind(on_activity_result=self.on_qr_activity_result)
         jpythonActivity.startActivityForResult(intent, self.REQUEST_CODE_SIMPLE_SCANNER_ACTIVITY)
