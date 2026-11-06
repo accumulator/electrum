@@ -96,8 +96,8 @@ class DNSTransport:
 
 
 class LocalTransport(DNSTransport):
-    """Plain DNS to the system (DHCP-provided) nameservers over UDP, falling back to
-    TCP on truncation (DNSSEC responses are large and routinely get truncated).
+    """Plain DNS to the system (DHCP-provided) nameservers over TCP (DNSSEC responses are large and routinely
+    get truncated over UDP).
     Nameservers are tried in order, FALLBACK_NAMESERVER last. One answering SERVFAIL/REFUSED
     is skipped for that query, an unreachable one for the rest of the lookup.
     Used when no proxy is configured."""
@@ -111,7 +111,7 @@ class LocalTransport(DNSTransport):
         response = None
         for ns in list(self.nameservers):
             try:
-                response, _used_tcp = await dns.asyncquery.udp_with_fallback(q, ns, timeout=5)
+                response = await dns.asyncquery.tcp(q, ns, timeout=5)
             except (dns.exception.DNSException, OSError, ValueError) as e:  # e.g. timeout, TCP refused, bad address
                 _logger.info(f"nameserver {ns} failed, skipping it: {e!r}")
                 self.nameservers.remove(ns)
@@ -265,7 +265,7 @@ async def query(
     so the caller must carefully consider whether the response can be used for anything if validated=False.
 
     The transport is chosen from the proxy settings: without a proxy we query the system
-    (DHCP-provided) nameservers directly over UDP/TCP, falling back to FALLBACK_NAMESERVER;
+    (DHCP-provided) nameservers directly over TCP, falling back to FALLBACK_NAMESERVER;
     with a proxy we run DNS-over-HTTPS tunneled through it (SOCKS cannot carry UDP, and
     Tor's RESOLVE extension supports neither TXT nor DNSSEC). The DoH endpoint is taken
     from ProxySettings.doh_endpoint.
