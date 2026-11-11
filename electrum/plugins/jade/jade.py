@@ -88,7 +88,8 @@ def _http_request(params):
     json_response = Network.send_http_on_proxy(method, url, json=json_payload)
     return {'body': json.loads(json_response)}
 
-class Jade_Client(HardwareClientBase):
+
+class JadeClient(HardwareClientBase):
 
     @staticmethod
     def _network() -> str:
@@ -330,7 +331,7 @@ class JadePlugin(HW_PluginBase):
         if self.SIMULATOR_PATH is not None and self.SIMULATOR_TEST_SEED is not None:
             try:
                 # If we can connect to a simulator and poke a seed in, add that too
-                client = Jade_Client(self.SIMULATOR_PATH, plugin=self)
+                client = JadeClient(self.SIMULATOR_PATH, plugin=self)
                 device = Device(path=self.SIMULATOR_PATH,
                                 interface_number=-1,
                                 id_='Jade Qemu Simulator',
@@ -370,7 +371,7 @@ class JadePlugin(HW_PluginBase):
 
     @runs_in_hwd_thread
     def create_client(self, device, handler):
-        client = Jade_Client(device.path, plugin=self)
+        client = JadeClient(device.path, plugin=self)
 
         # Check minimum supported firmware version
         if self.MIN_SUPPORTED_FW_VERSION > client.fwversion:
