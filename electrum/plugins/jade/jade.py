@@ -12,7 +12,7 @@ from electrum.transaction import PartialTransaction, Transaction
 from electrum.wallet import Multisig_Wallet
 from electrum.util import UserFacingException
 from electrum.logging import get_logger
-from electrum.plugin import runs_in_hwd_thread, Device
+from electrum.plugin import runs_in_hwd_thread, Device, DeviceTransport
 from electrum.network import Network
 
 from electrum.hw_wallet import HW_PluginBase, HardwareClientBase
@@ -336,7 +336,8 @@ class JadePlugin(HW_PluginBase):
                                 id_='Jade Qemu Simulator',
                                 product_key=self.DEVICE_IDS[0],
                                 usage_page=-1,
-                                transport_ui_string='simulator')
+                                transport_ui_string='simulator',
+                                transport=DeviceTransport.TCP)
                 if client.jade.set_seed(self.SIMULATOR_TEST_SEED):
                     devices.append(device)
                 client.close()
