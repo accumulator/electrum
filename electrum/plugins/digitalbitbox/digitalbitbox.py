@@ -699,7 +699,7 @@ class DigitalBitboxPlugin(HW_PluginBase):
         return dev
 
     def create_client(self, device: 'Device', handler):
-        if device.interface_number == 0 or device.usage_page == 0xffff:
+        if device.interface_number == 0:
             hid_device = self.get_dbb_device(device)
             if hid_device is not None:
                 client = DigitalBitboxClient(device, self, hid_device)
