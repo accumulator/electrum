@@ -147,19 +147,19 @@ class KeepKeyPlugin(HW_PluginBase):
             return None
 
     @runs_in_hwd_thread
-    def create_client(self, device, handler):
-        if device.product_key[1] == 2:
-            transport = self._try_webusb(device)
+    def create_client(self, device_descriptor: 'Device', handler):
+        if device_descriptor.product_key[1] == 2:
+            transport = self._try_webusb(device_descriptor)
         else:
-            transport = self._try_hid(device)
+            transport = self._try_hid(device_descriptor)
 
         if not transport:
             self.logger.info("cannot connect to device")
             return
 
-        self.logger.info(f"connected to device at {device.path}")
+        self.logger.info(f"connected to device at {device_descriptor.path}")
 
-        client = self.client_class(transport, handler, self)
+        client = self.client_class(device_descriptor, transport, handler, self)
 
         # Try a ping for device sanity
         try:

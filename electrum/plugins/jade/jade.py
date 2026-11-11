@@ -109,11 +109,12 @@ class JadeClient(HardwareClientBase):
     def _convertAddrType(cls, addrType: str, multisig: bool) -> str:
         return cls.MULTI_ADDRTYPES[addrType] if multisig else cls.ADDRTYPES[addrType]
 
-    def __init__(self, device: str, plugin: HW_PluginBase):
-        HardwareClientBase.__init__(self, plugin=plugin)
+    def __init__(self, device_descriptor: 'Device', plugin: HW_PluginBase):
+        HardwareClientBase.__init__(self, plugin=plugin, device_descriptor=device_descriptor)
 
+        device_path = device_descriptor.path
         # Connect with a small timeout to test connection
-        self.jade = JadeAPI.create_serial(device, timeout=1)
+        self.jade = JadeAPI.create_serial(device_path, timeout=1)
         self.jade.connect()
 
         verinfo = self.jade.get_version_info()
@@ -122,7 +123,7 @@ class JadeClient(HardwareClientBase):
         self.jade.disconnect()
 
         # Reconnect with the default timeout for all subsequent calls
-        self.jade = JadeAPI.create_serial(device)
+        self.jade = JadeAPI.create_serial(device_path)
         self.jade.connect()
 
         # Push some host entropy into jade
@@ -331,7 +332,6 @@ class JadePlugin(HW_PluginBase):
         if self.SIMULATOR_PATH is not None and self.SIMULATOR_TEST_SEED is not None:
             try:
                 # If we can connect to a simulator and poke a seed in, add that too
-                client = JadeClient(self.SIMULATOR_PATH, plugin=self)
                 device = Device(path=self.SIMULATOR_PATH,
                                 interface_number=-1,
                                 id_='Jade Qemu Simulator',
@@ -339,6 +339,7 @@ class JadePlugin(HW_PluginBase):
                                 usage_page=-1,
                                 transport_ui_string='simulator',
                                 transport=DeviceTransport.TCP)
+                client = JadeClient(device, plugin=self)
                 if client.jade.set_seed(self.SIMULATOR_TEST_SEED):
                     devices.append(device)
                 client.close()
@@ -370,8 +371,8 @@ class JadePlugin(HW_PluginBase):
         return version
 
     @runs_in_hwd_thread
-    def create_client(self, device, handler):
-        client = JadeClient(device.path, plugin=self)
+    def create_client(self, device_descriptor: 'Device', handler):
+        client = JadeClient(device_descriptor, plugin=self)
 
         # Check minimum supported firmware version
         if self.MIN_SUPPORTED_FW_VERSION > client.fwversion:

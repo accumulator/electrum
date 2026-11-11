@@ -1,5 +1,6 @@
 import time
 from struct import pack
+from typing import TYPE_CHECKING
 
 import electrum_ecc as ecc
 
@@ -20,6 +21,9 @@ import trezorlib.btc
 import trezorlib.device
 
 from trezorlib.messages import RecoveryDeviceInputMethod
+
+if TYPE_CHECKING:
+    from electrum.plugin import Device
 
 
 MESSAGES = {
@@ -49,8 +53,8 @@ MESSAGES = {
 CANCEL_SUPPORTED = frozenset({models.T1B1, models.T2T1, models.T2B1, models.T3T1, models.T3B1})
 
 class TrezorClientBase(HardwareClientBase, Logger):
-    def __init__(self, transport, handler, plugin):
-        HardwareClientBase.__init__(self, plugin=plugin)
+    def __init__(self, device_descriptor: 'Device', transport, handler, plugin):
+        HardwareClientBase.__init__(self, plugin=plugin, device_descriptor=device_descriptor, handler=handler)
         Logger.__init__(self)
 
         if plugin.is_outdated_fw_ignored():
@@ -58,7 +62,6 @@ class TrezorClientBase(HardwareClientBase, Logger):
 
         self._session = None
         self.device = plugin.device
-        self.handler = handler
 
         self.transport = transport
         self.app = AppManifest(

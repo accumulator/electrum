@@ -37,7 +37,7 @@ from electrum.hw_wallet import HW_PluginBase, HardwareClientBase, HardwareHandle
 from electrum.hw_wallet.plugin import OperationCancelled
 
 if TYPE_CHECKING:
-    from electrum.plugin import DeviceInfo
+    from electrum.plugin import DeviceInfo, Device
     from electrum.wizard import NewWalletWizard
 
 _logger = get_logger(__name__)
@@ -75,9 +75,9 @@ CHANNEL_ID_KEY = 'comserverchannelid'
 DEPRECATION_WARNING_SHOWN = False
 
 class DigitalBitboxClient(HardwareClientBase):
-    def __init__(self, plugin, hidDevice):
-        HardwareClientBase.__init__(self, plugin=plugin)
-        self.dbb_hid = hidDevice
+    def __init__(self, device_descriptor: 'Device', plugin, hid_device):
+        HardwareClientBase.__init__(self, plugin=plugin, device_descriptor=device_descriptor)
+        self.dbb_hid = hid_device
         self.opened = True
         self.password = None
         self.isInitialized = False
@@ -693,16 +693,16 @@ class DigitalBitboxPlugin(HW_PluginBase):
         self.digitalbitbox_config = self.config.get('digitalbitbox', {})
 
     @runs_in_hwd_thread
-    def get_dbb_device(self, device):
+    def get_dbb_device(self, device: 'Device'):
         dev = hid.device()
         dev.open_path(device.path)
         return dev
 
-    def create_client(self, device, handler):
+    def create_client(self, device: 'Device', handler):
         if device.interface_number == 0 or device.usage_page == 0xffff:
-            client = self.get_dbb_device(device)
-            if client is not None:
-                client = DigitalBitboxClient(self, client)
+            hid_device = self.get_dbb_device(device)
+            if hid_device is not None:
+                client = DigitalBitboxClient(device, self, hid_device)
             return client
         else:
             return None
