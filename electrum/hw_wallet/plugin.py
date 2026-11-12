@@ -204,8 +204,7 @@ class HW_PluginBase(BasePlugin, ABC):
                       handler: Optional['HardwareHandlerBase']) -> Optional['HardwareClientBase']:
         raise NotImplementedError()
 
-    def create_handler(self, window) -> 'HardwareHandlerBase':
-        # note: in Qt GUI, 'window' is either an ElectrumWindow or an QENewWalletWizard
+    def create_handler(self, *args) -> 'HardwareHandlerBase':
         raise NotImplementedError()
 
     def can_recognize_device(self, device: Device) -> bool:

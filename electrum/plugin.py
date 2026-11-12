@@ -142,6 +142,9 @@ _zip_importers = {}  # type: Dict[str, MemoryZipImporter]  # see _get_zip_import
 _zip_importers_lock = threading.RLock()
 
 
+class MissingLibrariesException(Exception): pass
+
+
 class Plugins(DaemonThread):
 
     pkgpath = os.path.dirname(plugins.__file__)
@@ -896,7 +899,7 @@ class Plugins(DaemonThread):
                 return False
         return True
 
-    def get_hardware_support(self):
+    def get_hardware_support(self) -> Sequence['HardwarePluginToScan']:
         out = []
         for name, details in self._hw_wallets.items():
             if not self.is_authorized(name):
@@ -1023,6 +1026,8 @@ class BasePlugin(Logger):
                 l = hooks.get(k, [])
                 l.append((self, getattr(self, k)))
                 hooks[k] = l
+
+        self.fs_root = os.path.dirname(sys.modules[self.__module__].__file__)
 
     def __str__(self):
         return self.name
