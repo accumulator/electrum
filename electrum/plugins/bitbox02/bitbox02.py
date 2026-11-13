@@ -13,7 +13,7 @@ from electrum.i18n import _
 from electrum.keystore import Hardware_KeyStore
 from electrum.transaction import PartialTransaction, Sighash
 from electrum.wallet import Multisig_Wallet, Deterministic_Wallet
-from electrum.util import UserFacingException
+from electrum.util import UserFacingException, UserCancelled
 from electrum.logging import get_logger
 from electrum.plugin import DeviceInfo, runs_in_hwd_thread, Plugins
 from electrum.simple_config import SimpleConfig
@@ -111,6 +111,10 @@ class BitBox02Client(HardwareClientBase):
         except Exception:
             pass
 
+    def abort(self):
+        if self.hid_device:
+            self.hid_device.close()
+
     def has_usable_connection_with_device(self) -> bool:
         if self.bitbox_hid_info is None:
             return False
@@ -129,8 +133,8 @@ class BitBox02Client(HardwareClientBase):
     @runs_in_hwd_thread
     def pairing_dialog(self):
         def pairing_step(code: str, device_response: Callable[[], bool]) -> bool:
-            msg = "Please compare and confirm the pairing code on your BitBox02:\n" + code
-            self.handler.show_message(msg)
+            msg = "Please compare and confirm the pairing code on your BitBox02:\n\n" + code
+            self.handler.show_message(msg, on_cancel=lambda: self.hid_device.close())
             try:
                 res = device_response()
             except Exception:
@@ -204,15 +208,27 @@ class BitBox02Client(HardwareClientBase):
                 # bitbox02 module needs 'serial_number', which is only available after opening connection
                 self.bitbox_hid_info['serial_number'] = self.hid_device.get_serial_number_string()
 
-                bitbox02_device = bitbox02.BitBox02(
-                    transport=u2fhid.U2FHid(self.hid_device),
-                    device_info=self.bitbox_hid_info,
-                    noise_config=NoiseConfig(),
+                self.handler.show_message(
+                    f'Please unlock your {self.bitbox_hid_info["product_string"]} device',
+                    on_cancel=lambda: self.hid_device.close()
                 )
+
                 try:
+                    bitbox02_device = bitbox02.BitBox02(
+                        transport=u2fhid.U2FHid(self.hid_device),
+                        device_info=self.bitbox_hid_info,
+                        noise_config=NoiseConfig(),
+                    )
                     bitbox02_device.check_min_version()
+                except ValueError as e:
+                    if str(e) != 'not open':
+                        raise
+                    # the hid device was closed under the library: Cancel (on_cancel) or abort()
+                    raise UserCancelled() from e
                 except FirmwareVersionOutdatedException:
                     raise
+                finally:
+                    self.handler.finished()
             except BaseException:
                 # the pairing did not complete: don't keep the device open
                 self.hid_device.close()
