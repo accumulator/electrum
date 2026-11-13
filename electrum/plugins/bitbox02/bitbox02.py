@@ -84,16 +84,18 @@ class BitBox02Client(HardwareClientBase):
             }
             self.config.set_key("bitbox02", bitbox02_config)
 
-        bitboxes = devices.get_any_bitbox02s()
-        for bitbox in bitboxes:
-            if (
-                bitbox["path"] == self.device_descriptor.path
-                and bitbox["interface_number"]
-                == self.device_descriptor.interface_number
-            ):
-                self.bitbox_hid_info = bitbox
-        if self.bitbox_hid_info is None:
-            raise Exception("No BitBox02 detected")
+        _logger.info(f'device {device_descriptor!r}')
+        bitbox = {
+            'path': device_descriptor.path,
+            'vendor_id': device_descriptor.product_key[0],
+            'product_id': device_descriptor.product_key[1],
+            'interface_number': 0,
+            'bus_type': 1,
+            'serial_number': '',
+            'product_string': device_descriptor.product_name,
+        }
+        self.bitbox_hid_info = bitbox
+        self.hid_device: hid.device = None
 
     def device_model_name(self) -> Optional[str]:
         return 'BitBox02'
@@ -132,7 +134,7 @@ class BitBox02Client(HardwareClientBase):
                 res = device_response()
             except Exception:
                 # Close the hid device on exception
-                hid_device.close()
+                self.hid_device.close()
                 raise
             finally:
                 self.handler.finished()
@@ -196,11 +198,12 @@ class BitBox02Client(HardwareClientBase):
                 return set_noise_privkey(privkey)
 
         if self.bitbox02_device is None:
-            hid_device = hid.device()
-            hid_device.open_path(self.bitbox_hid_info["path"])
+            self.hid_device = self.handler.open_hid_device(self.device_descriptor)
+            # bitbox02 module needs 'serial_number', which is only available after opening connection
+            self.bitbox_hid_info['serial_number'] = self.hid_device.get_serial_number_string()
 
             bitbox02_device = bitbox02.BitBox02(
-                transport=u2fhid.U2FHid(hid_device),
+                transport=u2fhid.U2FHid(self.hid_device),
                 device_info=self.bitbox_hid_info,
                 noise_config=NoiseConfig(),
             )
@@ -653,6 +656,15 @@ class BitBox02Plugin(HW_PluginBase):
             return version
         else:
             raise ImportError()
+
+    def can_recognize_device(self, device: 'Device') -> bool:
+        # the HWW interface is interface 0, U2F (multi editions) is interface 1.
+        # The product string tells the firmware apart from the bootloader (same usb ids); accept the
+        # same product strings as the bitbox02 library does (see devices.get_any_bitbox02s()).
+        return (super().can_recognize_device(device)
+                and device.interface_number == 0
+                and device.product_name in (devices.BITBOX02MULTI, devices.BITBOX02BTC,
+                                            devices.BITBOX02PLUS_MULTI, devices.BITBOX02PLUS_BTC))
 
     @runs_in_hwd_thread
     def create_client(self, device_descriptor: 'Device', handler) -> BitBox02Client:
