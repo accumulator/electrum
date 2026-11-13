@@ -659,6 +659,9 @@ class BitBox02Plugin(HW_PluginBase):
 
     SUPPORTED_XTYPES = ("p2wpkh-p2sh", "p2wpkh", "p2wsh", "p2wsh-p2sh")
 
+    icon_unpaired = "bitbox02_unpaired.png"
+    icon_paired = "bitbox02.png"
+
     def __init__(self, parent: HW_PluginBase, config: SimpleConfig, name: str):
         super().__init__(parent, config, name)
 
