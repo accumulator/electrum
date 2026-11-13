@@ -500,6 +500,9 @@ class ColdcardPlugin(HW_PluginBase):
 
     SUPPORTED_XTYPES = ('standard', 'p2wpkh-p2sh', 'p2wpkh', 'p2wsh-p2sh', 'p2wsh')
 
+    icon_unpaired = "coldcard_unpaired.png"
+    icon_paired = "coldcard.png"
+
     def __init__(self, parent, config, name):
         HW_PluginBase.__init__(self, parent, config, name)
 

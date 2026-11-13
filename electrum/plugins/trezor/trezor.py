@@ -164,6 +164,9 @@ class TrezorPlugin(HW_PluginBase):
 
     MAX_LABEL_LEN = 32
 
+    icon_unpaired = "trezor_unpaired.png"
+    icon_paired = "trezor.png"
+
     def __init__(self, parent, config, name):
         super().__init__(parent, config, name)
 

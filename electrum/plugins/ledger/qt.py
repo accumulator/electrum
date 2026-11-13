@@ -18,9 +18,6 @@ if TYPE_CHECKING:
 
 
 class Plugin(LedgerPlugin, QtPluginBase):
-    icon_unpaired = "ledger_unpaired.png"
-    icon_paired = "ledger.png"
-
     def create_handler(self, window):
         return Ledger_Handler(window)
 

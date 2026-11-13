@@ -316,6 +316,9 @@ class JadePlugin(HW_PluginBase):
     SIMULATOR_PATH = None  # 'tcp:127.0.0.1:2222'
     SIMULATOR_TEST_SEED = None  # bytes.fromhex('b90e532426d0dc20fffe01037048c018e940300038b165c211915c672e07762c')
 
+    icon_unpaired = "jade_unpaired.png"
+    icon_paired = "jade.png"
+
     def enumerate_serial(self):
         # Jade is not really an HID device, it shows as a serial/com port device.
         # Scan com ports looking for the relevant vid and pid, and use 'path' to

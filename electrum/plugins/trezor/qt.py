@@ -456,9 +456,6 @@ class InitSettingsLayout(QVBoxLayout):
 
 
 class Plugin(TrezorPlugin, QtPlugin):
-    icon_unpaired = "trezor_unpaired.png"
-    icon_paired = "trezor.png"
-
     def create_handler(self, window):
         return QtHandler(window, self.pin_matrix_widget_class(), self.device)
 

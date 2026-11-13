@@ -19,9 +19,6 @@ if TYPE_CHECKING:
 
 
 class Plugin(JadePlugin, QtPluginBase):
-    icon_unpaired = "jade_unpaired.png"
-    icon_paired = "jade.png"
-
     def create_handler(self, window):
         return Jade_Handler(window)
 

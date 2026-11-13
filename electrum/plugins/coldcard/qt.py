@@ -26,9 +26,6 @@ CC_DEBUG = False
 
 
 class Plugin(ColdcardPlugin, QtPluginBase):
-    icon_unpaired = "coldcard_unpaired.png"
-    icon_paired = "coldcard.png"
-
     def create_handler(self, window):
         return Coldcard_Handler(window)
 

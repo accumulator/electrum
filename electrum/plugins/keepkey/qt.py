@@ -313,9 +313,6 @@ class KeepkeyInitLayout(QVBoxLayout):
 
 
 class Plugin(KeepKeyPlugin, QtPlugin):
-    icon_paired = "keepkey.png"
-    icon_unpaired = "keepkey_unpaired.png"
-
     def create_handler(self, window):
         return QtHandler(window, self.pin_matrix_widget_class(), self.device)
 

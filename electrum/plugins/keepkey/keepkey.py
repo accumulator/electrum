@@ -70,6 +70,9 @@ class KeepKeyPlugin(HW_PluginBase):
 
     MAX_LABEL_LEN = 32
 
+    icon_paired = "keepkey.png"
+    icon_unpaired = "keepkey_unpaired.png"
+
     def __init__(self, parent, config, name):
         HW_PluginBase.__init__(self, parent, config, name)
 

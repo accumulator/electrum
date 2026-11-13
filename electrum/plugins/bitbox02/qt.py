@@ -21,9 +21,6 @@ if TYPE_CHECKING:
 
 
 class Plugin(BitBox02Plugin, QtPluginBase):
-    icon_unpaired = "bitbox02_unpaired.png"
-    icon_paired = "bitbox02.png"
-
     def create_handler(self, window):
         return BitBox02_Handler(window)
 
