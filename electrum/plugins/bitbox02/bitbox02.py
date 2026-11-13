@@ -101,6 +101,9 @@ class BitBox02Client(HardwareClientBase):
     def is_initialized(self) -> bool:
         return True
 
+    def is_paired(self):
+        return bool(self.bitbox02_device)
+
     @runs_in_hwd_thread
     def close(self):
         try:
@@ -121,8 +124,8 @@ class BitBox02Client(HardwareClientBase):
         return True
 
     @runs_in_hwd_thread
-    def get_soft_device_id(self) -> Optional[str]:
-        if self.handler is None:
+    def get_soft_device_id(self, *, avoid_pairing: bool = False) -> Optional[str]:
+        if (avoid_pairing and not self.bitbox02_device) or self.handler is None:
             # Can't do the pairing without the handler. This happens at wallet creation time, when
             # listing the devices.
             return None
@@ -294,8 +297,8 @@ class BitBox02Client(HardwareClientBase):
                                              display=display)
 
     @runs_in_hwd_thread
-    def label(self) -> str:
-        if self.handler is None:
+    def label(self, *, avoid_pairing: bool = False) -> str:
+        if (avoid_pairing and not self.bitbox02_device) or self.handler is None:
             # Can't do the pairing without the handler. This happens at wallet creation time, when
             # listing the devices.
             return super().label()
