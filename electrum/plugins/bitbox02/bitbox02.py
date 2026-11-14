@@ -719,13 +719,6 @@ class BitBox02Plugin(HW_PluginBase):
         xtype = keystore.get_bip32_node_for_xpub().xtype
         client.get_xpub(derivation, xtype, display=True)
 
-    def create_device_from_hid_enumeration(self, d: dict, *, product_key) -> 'Device':
-        device = super().create_device_from_hid_enumeration(d, product_key=product_key)
-        # The BitBox02's product_id is not unique per device, thus use the path instead to
-        # distinguish devices.
-        id_ = str(d['path'])
-        return device._replace(id_=id_)
-
     def wizard_entry_for_device(self, device_info: 'DeviceInfo', *, new_wallet=True) -> str:
         # Note: device_info.initialized for this hardware doesn't imply a seed is present,
         # only that it has firmware installed
