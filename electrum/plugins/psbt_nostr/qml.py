@@ -113,7 +113,7 @@ class Plugin(PsbtNostrPlugin):
             self.load_wallet(wallet)
 
     @hook
-    def load_wallet(self, wallet: 'Abstract_Wallet'):
+    def load_wallet(self, wallet: 'Abstract_Wallet', parent=None):
         # remove existing, only foreground wallet active
         for _wallet in self.cosigner_wallets.copy().keys():
             self.remove_cosigner_wallet(_wallet)

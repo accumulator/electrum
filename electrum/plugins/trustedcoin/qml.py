@@ -25,7 +25,7 @@ class Plugin(TrustedCoinPlugin):
         self.so = None  # type: TrustedcoinPluginQObject
 
     @hook
-    def load_wallet(self, wallet: 'Abstract_Wallet'):
+    def load_wallet(self, wallet: 'Abstract_Wallet', parent=None):
         if not isinstance(wallet, self.wallet_class):
             return
         self.logger.debug(f'plugin enabled for wallet "{str(wallet)}"')

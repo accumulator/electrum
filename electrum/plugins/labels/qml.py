@@ -92,7 +92,7 @@ class Plugin(LabelsPlugin):
         self.so = None
 
     @hook
-    def load_wallet(self, wallet):
+    def load_wallet(self, wallet, parent=None):
         self.logger.debug(f'plugin enabled for wallet "{str(wallet)}"')
         self.start_wallet(wallet)
 
