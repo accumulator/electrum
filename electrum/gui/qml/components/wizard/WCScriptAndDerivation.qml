@@ -12,6 +12,7 @@ WizardComponent {
     valid: false
 
     property bool isMultisig: false
+    property bool isHardware: false
     property int cosigner: 0
     property int participants: 0
 
@@ -189,7 +190,7 @@ WizardComponent {
             Button {
                 Layout.alignment: Qt.AlignHCenter
                 Layout.topMargin: constants.paddingLarge
-                visible: !isMultisig
+                visible: !isMultisig && !isHardware
                 text: qsTr('Detect Existing Accounts')
                 onClicked: {
                     var dialog = bip39recoveryDialog.createObject(mainLayout, {
@@ -233,6 +234,7 @@ WizardComponent {
                 cosigner = wizard_data['multisig_current_cosigner']
             validate()
         }
+        isHardware = wizard_data['keystore_type'] == 'hardware'
     }
 }
 
