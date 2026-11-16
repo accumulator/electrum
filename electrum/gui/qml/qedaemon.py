@@ -17,6 +17,7 @@ from electrum.wallet import Abstract_Wallet
 
 from .auth import AuthMixin, auth_protect
 from .qefx import QEFX
+from .qehardwarelistmodel import QEHardwareListModel
 from .qewallet import QEWallet
 from .qewizard import QENewWalletWizard, QEServerConnectWizard, QETermsOfUseWizard
 
@@ -133,6 +134,7 @@ class QEDaemon(AuthMixin, QObject):
     _logger = get_logger(__name__)
 
     _available_wallets = None
+    _hardware_listmodel = None
     _current_wallet = None
     _new_wallet_wizard = None
     _terms_of_use_wizard = None
@@ -146,6 +148,7 @@ class QEDaemon(AuthMixin, QObject):
     _backendWalletLoaded = pyqtSignal([str], arguments=['password'])
 
     availableWalletsChanged = pyqtSignal()
+    hardwareListModelChanged = pyqtSignal()
     fxChanged = pyqtSignal()
     newWalletWizardChanged = pyqtSignal()
     termsOfUseWizardChanged = pyqtSignal()
@@ -386,6 +389,13 @@ class QEDaemon(AuthMixin, QObject):
             self._available_wallets = QEWalletListModel(self.daemon)
 
         return self._available_wallets
+
+    @pyqtProperty(QEHardwareListModel, notify=hardwareListModelChanged)
+    def hardwareListModel(self):
+        if not self._hardware_listmodel:
+            self._hardware_listmodel = QEHardwareListModel(plugins=self.plugins)
+
+        return self._hardware_listmodel
 
     @pyqtProperty(QEFX, notify=fxChanged)
     def fx(self):
