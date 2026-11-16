@@ -6,7 +6,7 @@ from PyQt6.QtCore import pyqtProperty, pyqtSignal, pyqtSlot, QObject
 from electrum.base_crash_reporter import send_exception_to_crash_reporter
 from electrum.logging import get_logger
 from electrum import mnemonic
-from electrum.wizard import NewWalletWizard, ServerConnectWizard, TermsOfUseWizard
+from electrum.wizard import NewWalletWizard, ServerConnectWizard, TermsOfUseWizard, WizardViewState
 from electrum.util import UserFacingException
 from electrum.gui import messages
 
@@ -26,8 +26,14 @@ class QEAbstractWizard(QObject):
         QObject.__init__(self, parent)
 
     @pyqtSlot(result=str)
-    def startWizard(self):
-        self.start()
+    @pyqtSlot(str, result=str)
+    @pyqtSlot(str, 'QJSValue', result=str)
+    def startWizard(self, initial_view: str = None, initial_data=None):
+        vs = None
+        if initial_view:
+            wizard_data = initial_data.toVariant() if initial_data else None
+            vs = WizardViewState(view=initial_view, wizard_data=wizard_data, params={})
+        self.start(start_viewstate=vs)
         return self._current.view
 
     @pyqtSlot(str, result=str)
@@ -38,7 +44,7 @@ class QEAbstractWizard(QObject):
     def submit(self, wizard_data):
         wdata = wizard_data.toVariant()
         view = self.resolve_next(self._current.view, wdata)
-        return { 'view': view.view, 'wizard_data': view.wizard_data }
+        return {'view': view.view, 'wizard_data': view.wizard_data}
 
     @pyqtSlot(result='QVariant')
     def prev(self):
