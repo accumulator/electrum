@@ -12,6 +12,7 @@ Wizard {
 
     signal walletCreated
 
+    property bool new_wallet: true
     property string path
     property var initial_data
     property string initial_view
@@ -31,8 +32,12 @@ Wizard {
     }
 
     onAccepted: {
-        console.log('Finished new wallet wizard')
-        wiz.createStorage(wizard_data, Daemon.singlePasswordEnabled, Daemon.singlePassword)
+        if (new_wallet) {
+            console.log('Finished new wallet wizard')
+            wiz.createStorage(wizard_data, Daemon.singlePasswordEnabled, Daemon.singlePassword)
+        } else {
+            console.log('Finished open wallet wizard')
+        }
     }
 
     Connections {

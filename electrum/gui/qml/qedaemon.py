@@ -158,6 +158,7 @@ class QEDaemon(AuthMixin, QObject):
 
     walletLoaded = pyqtSignal([str, str], arguments=['name', 'path'])
     walletRequiresPassword = pyqtSignal([str, str], arguments=['name', 'path'])
+    walletRequiresHardwareDevice = pyqtSignal([str, str], arguments=['name', 'path'])
     walletOpenError = pyqtSignal([str], arguments=["error"])
     walletDeleteError = pyqtSignal([str, str], arguments=['code', 'message'])
     walletRenameError = pyqtSignal([str], arguments=['message'])
@@ -223,7 +224,9 @@ class QEDaemon(AuthMixin, QObject):
             try:
                 local_password = password  # need this in local scope
                 wallet = None
+                temp_storage = None
                 try:
+                    temp_storage = WalletStorage(self._path)
                     wallet = self.daemon.load_wallet(
                         self._path,
                         password=local_password,
@@ -232,7 +235,10 @@ class QEDaemon(AuthMixin, QObject):
                         force_check_password=True,
                     )
                 except InvalidPassword:
-                    self.walletRequiresPassword.emit(self._name, self._path)
+                    if temp_storage.is_encrypted_with_hw_device():
+                        self.walletRequiresHardwareDevice.emit(self._name, self._path)
+                    else:
+                        self.walletRequiresPassword.emit(self._name, self._path)
                 except FileNotFoundError:
                     self.walletOpenError.emit(_('File not found') + f":\n{self._path}")
                 except StorageReadWriteError:

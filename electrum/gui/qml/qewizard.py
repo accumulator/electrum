@@ -73,6 +73,10 @@ class QENewWalletWizard(NewWalletWizard, QEAbstractWizard):
         # attach view names and accept handlers
         self.navmap_merge({
             'wallet_name': {'gui': 'WCWalletName'},
+            'hw_unlock': {
+                'gui': 'WCChooseHWDevice',
+                'accept': self.choose_hww
+            },
             'wallet_type': {'gui': 'WCWalletType'},
             'keystore_type': {'gui': 'WCKeystoreType'},
             'create_seed': {'gui': 'WCCreateSeed'},
@@ -93,6 +97,14 @@ class QENewWalletWizard(NewWalletWizard, QEAbstractWizard):
             'imported': {'gui': 'WCImport'},
             'wallet_password': {'gui': 'WCWalletPassword'}
         })
+
+    def choose_hww(self, wizard_data):
+        current_cosigner = self.current_cosigner(wizard_data)
+        device_uid = current_cosigner['hardware_uid']
+        device_info = self._qedaemon.hardwareListModel.get_device_info(device_uid)
+        if not device_info:
+            raise Exception('selected hww not found')
+        current_cosigner['hardware_device'] = (device_info.plugin_name, device_info)
 
     @pyqtSlot(str)
     def unlockHww(self, device_uid):
