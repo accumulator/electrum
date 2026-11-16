@@ -44,8 +44,7 @@ WizardComponent {
         }
         ElRadioButton {
             Layout.fillWidth: true
-            enabled: false
-            visible: false
+            // enabled: false
             ButtonGroup.group: keystoregroup
             property string keystoretype: 'hardware'
             text: qsTr('Use a hardware device')

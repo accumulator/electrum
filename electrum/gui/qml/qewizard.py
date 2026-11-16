@@ -73,6 +73,7 @@ class QENewWalletWizard(NewWalletWizard, QEAbstractWizard):
             'confirm_ext': {'gui': 'WCConfirmExt'},
             'have_seed': {'gui': 'WCHaveSeed'},
             'have_ext': {'gui': 'WCEnterExt'},
+            'choose_hardware_device': {'gui': 'WCChooseHWDevice'},
             'script_and_derivation': {'gui': 'WCScriptAndDerivation'},
             'have_master_key': {'gui': 'WCHaveMasterKey'},
             'multisig': {'gui': 'WCMultisig'},
