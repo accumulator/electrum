@@ -1,4 +1,4 @@
-import os
+import threading
 from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import pyqtProperty, pyqtSignal, pyqtSlot, QObject
@@ -7,10 +7,12 @@ from electrum.base_crash_reporter import send_exception_to_crash_reporter
 from electrum.logging import get_logger
 from electrum import mnemonic
 from electrum.wizard import NewWalletWizard, ServerConnectWizard, TermsOfUseWizard, WizardViewState
-from electrum.util import UserFacingException
+from electrum.util import UserFacingException, UserCancelled
 from electrum.gui import messages
 
 if TYPE_CHECKING:
+    from electrum.hw_wallet.qml import QmlPluginBase
+    from electrum.hw_wallet.qml import QmlHandlerBase
     from electrum.gui.qml.qedaemon import QEDaemon
     from electrum.plugin import Plugins
 
@@ -91,6 +93,40 @@ class QENewWalletWizard(NewWalletWizard, QEAbstractWizard):
             'imported': {'gui': 'WCImport'},
             'wallet_password': {'gui': 'WCWalletPassword'}
         })
+
+    @pyqtSlot(str)
+    def unlockHww(self, device_uid):
+        device_info = self._qedaemon.hardwareListModel.get_device_info(device_uid)
+        if not device_info:
+            raise Exception('selected hww not found')
+
+        plugin = self.plugins.get_plugin(device_info.plugin_name)  # type: QmlPluginBase
+        handler = plugin.create_handler(device_uid)  # type: QmlHandlerBase
+        # TODO: create_client -> client_by_id?
+        client = self.plugins.device_manager.create_client(device_info.device, handler, plugin)
+        client.handler = handler
+        # self.title = _('Unlocking {} ({})').format(_info.model_name, _info.label)
+
+        def unlock_task(client):
+            try:
+                self.password = client.get_password_for_storage_encryption()
+                # we have the password, let GUI know
+                client.handler.show_message('Unlocked')
+                client.handler.password_available.emit()
+            except UserCancelled as e:
+                client.handler.show_error(repr(e))
+            except Exception as e:
+                client.handler.show_error(repr(e))
+                self._logger.exception(repr(e))
+            finally:
+                client.handler.finished()
+
+        t = threading.Thread(target=unlock_task, args=(client,), daemon=True)
+        t.start()
+
+    @pyqtSlot(result=str)
+    def getHwwPassword(self):
+        return self.password
 
     pathChanged = pyqtSignal()
     @pyqtProperty(str, notify=pathChanged)

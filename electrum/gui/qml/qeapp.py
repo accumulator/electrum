@@ -359,6 +359,18 @@ class QEAppController(BaseCrashReporter, QObject):
             self.logger.debug('None!')
             return None
 
+    @pyqtSlot(str, result=QObject)
+    def deviceHandler(self, device_uid):
+        # returns handler-QObject associated to device
+        client = self._plugins.device_manager.client_by_id(device_uid, scan_now=False)
+        plugin = client.plugin
+        self.logger.debug(f'plugin for device {device_uid} is {str(type(plugin))}')
+        if not plugin:
+            return None
+        if not client.handler:
+            client.handler = plugin.create_handler(device_uid, self)
+        return client.handler
+
     @pyqtProperty('QVariantList', notify=_dummy)
     def plugins(self):
         s = []
