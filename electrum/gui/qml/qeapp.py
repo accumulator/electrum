@@ -6,7 +6,7 @@ import sys
 import html
 import threading
 from functools import partial
-from typing import TYPE_CHECKING, Set, List, Optional, Callable
+from typing import TYPE_CHECKING, Set, List, Optional, Callable, Sequence
 
 from PyQt6.QtCore import (pyqtSlot, pyqtSignal, pyqtProperty, QObject, QT_VERSION_STR, PYQT_VERSION_STR,
                           qInstallMessageHandler, QTimer, QSortFilterProxyModel)
@@ -20,7 +20,7 @@ from electrum.logging import Logger, get_logger
 from electrum.bip21 import BITCOIN_BIP21_URI_SCHEME, LIGHTNING_URI_SCHEME
 from electrum.base_crash_reporter import BaseCrashReporter, EarlyExceptionsQueue
 from electrum.network import Network
-from electrum.plugin import run_hook
+from electrum.plugin import run_hook, DeviceMgr, Device, DeviceTransport, runs_in_hwd_thread
 from electrum.gui.common_qt.util import get_font_id, break_qt_network
 from electrum.util import profiler
 from electrum.lnurl import SUPPORTED_LNURL_SCHEMES
@@ -62,6 +62,9 @@ if platform.is_android():
     jHfc = autoclass('android.view.HapticFeedbackConstants')
     jString = autoclass('java.lang.String')
     jIntent = autoclass('android.content.Intent')
+    jUsbDevice = autoclass('android.hardware.usb.UsbDevice')
+    jContext = autoclass('android.content.Context')
+    jHashMap = autoclass('java.util.HashMap')
     jview = jpythonActivity.getWindow().getDecorView()
     systemSdkVersion = autoclass('android.os.Build$VERSION').SDK_INT
 
@@ -609,6 +612,9 @@ class ElectrumQmlApplication(QGuiApplication):
             self.logger.warning('Could not load font PT Mono')
             self.fixedFont = 'Monospace' # hope for the best
 
+        if platform.is_android():
+            DeviceMgr.platform_scan_devices = self.scan_devices_android
+
         self.context = self.engine.rootContext()
         self.plugins = plugins
         self.config = QEConfig(config)
@@ -660,6 +666,27 @@ class ElectrumQmlApplication(QGuiApplication):
         if re.search('file:///.*TypeError: Cannot read property.*null$', file):
             return
         self.logger.warning(file)
+
+    @runs_in_hwd_thread
+    def scan_devices_android(self, *args) -> Sequence[Device]:
+        usb_devices = jpythonActivity.enumerateUsb()  # javatype: List<UsbDevice>
+        devices = []
+        for i in range(usb_devices.size()):
+            usb_device = usb_devices.get(i)
+            product_key = (usb_device.getVendorId(), usb_device.getProductId())
+            self.logger.info(f'USB: {repr(product_key)}: {usb_device.getProductName()} ({str(usb_device.getDeviceId())})')
+            devices.append(Device(
+                id_=str(usb_device.getDeviceId()),  # NOTE uniqueness internal
+                path=str(usb_device.getDeviceId()),  # NOTE used to request transport, android needs deviceid(?) to open.
+                interface_number=0,  # NOTE bitbox01/02, ledger, keepkey check this
+                product_key=product_key,  #: Any  # when using hid, often Tuple[int, int]
+                usage_page=0,  # not available: it is in the HID report descriptor, only readable after opening
+                transport_ui_string=usb_device.getProductName(),  # usb_device.getSerialNumber() requires permission first,
+                product_name=usb_device.getProductName(),
+                # NOTE transport_ui_string generic use, not provided by plugins but taken from hid enumerator
+                transport=DeviceTransport.HID  # assumed for now
+            ))
+        return devices
 
 
 class Exception_Hook(QObject, Logger):
