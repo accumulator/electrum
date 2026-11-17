@@ -73,6 +73,7 @@ version.filename = %(source.dir)s/electrum/version.py
 requirements =
     hostpython3,
     python3,
+    libusb,
     android,
     openssl,
     libffi,
@@ -80,7 +81,8 @@ requirements =
     pycryptodomex,
     pyqt6sip,
     pyqt6,
-    libzxing
+    libzxing,
+    hidapi
 
 # (str) Presplash of the application
 presplash.filename = %(source.dir)s/electrum/gui/icons/electrum_presplash.png
