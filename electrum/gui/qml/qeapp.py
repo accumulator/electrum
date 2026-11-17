@@ -276,6 +276,7 @@ class QEAppController(BaseCrashReporter, QObject):
             self._intent = intent
             return
 
+        self.logger.info(f'intent type={intent.getClass().getName()}')
         data = str(intent.getDataString())
         self.logger.debug(f'received intent: {repr(data)}')
         scheme = str(intent.getScheme()).lower()

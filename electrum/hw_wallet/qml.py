@@ -28,12 +28,14 @@ import threading
 from functools import partial
 from typing import TYPE_CHECKING, Union, Optional, Sequence, Type, Dict, Callable
 
+import hid
 from PyQt6.QtCore import QObject, pyqtSignal, Qt, pyqtSlot, QThread
 
 from electrum.i18n import _
 from electrum.logging import Logger
 from electrum.util import UserCancelled, UserFacingException, ChoiceItem
 from electrum.plugin import hook, MissingLibrariesException, Device, DeviceInfo
+from electrum import platform
 
 from electrum.gui.common_qt.util import TaskThread
 
@@ -77,6 +79,50 @@ class QmlHandlerBase(HardwareHandlerBase, QObject, Logger):
         self.done = threading.Event()
 
         self._on_cancel_message = None
+
+        if platform.is_android():
+            from jnius import autoclass
+            from electrum.gui.qml.android import PythonUsbListenerImpl
+
+            self.jpythonActivity = autoclass('org.kivy.android.PythonActivity').mActivity
+            self.usblistener = PythonUsbListenerImpl()
+            self.usblistener.on_usb_open = self.on_android_usb_open
+            self.usblistener.on_usb_not_open = self.on_android_usb_not_open
+            self.jpythonActivity.registerPythonUsbListener(self.usblistener)
+            # TODO unregister at destruction
+            self.fd = None
+
+    def open_hid_device(self, device: 'Device') -> hid.device:
+        # special handling for android, potential user interaction.
+        hid_device = hid.device()
+        if platform.is_android():
+            event = threading.Event()
+            event.clear()
+            self.android_usb_cb_info = (int(device.id_), event)
+            self.jpythonActivity.openUsbDevice(int(device.id_))
+            event.wait()  # TODO: timeout
+            if self.fd is None:
+                raise Exception('no fd')
+            hid_device.open_fd(self.fd, 0)
+        else:
+            hid_device.open_path(device.path)
+        return hid_device
+
+    def on_android_usb_open(self, usb_id: int, fd: int):
+        _usb_id, event = self.android_usb_cb_info
+        if usb_id != _usb_id:
+            return
+        self.logger.info(f'ANDROID USB OPENED: {usb_id=} {fd=}')
+        self.fd = fd
+        event.set()
+
+    def on_android_usb_not_open(self, usb_id: int):
+        _usb_id, event = self.android_usb_cb_info
+        if usb_id != _usb_id:
+            return
+        self.logger.info(f'ANDROID USB NOT OPENED: {usb_id=}')
+        self.fd = None
+        event.set()
 
     def update_status(self, paired):
         self.status_signal.emit(paired)
