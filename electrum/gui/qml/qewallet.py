@@ -10,6 +10,7 @@ from PyQt6.QtCore import pyqtProperty, pyqtSignal, pyqtSlot, QObject, QTimer
 
 from electrum.i18n import _
 from electrum.invoices import InvoiceError, PR_PAID, PR_BROADCASTING, PR_BROADCAST
+from electrum.keystore import Hardware_KeyStore
 from electrum.logging import get_logger
 from electrum.network import TxBroadcastError, BestEffortRequestFailed
 from electrum.transaction import PartialTransaction, Transaction
@@ -23,7 +24,7 @@ from electrum.wallet import Multisig_Wallet
 from electrum.crypto import pw_decode_with_version_and_mac
 from electrum.fee_policy import FeePolicy, FixedFeePolicy
 
-from electrum.gui.common_qt.util import QtEventListener, qt_event_listener
+from electrum.gui.common_qt.util import QtEventListener, qt_event_listener, ignore_if_destroyed
 
 from .auth import AuthMixin, auth_protect
 from .qeaddresslistmodel import QEAddressCoinListModel
@@ -85,6 +86,7 @@ class QEWallet(AuthMixin, QObject, QtEventListener):
     signMessageError = pyqtSignal([str], arguments=['error'])
 
     _network_signal = pyqtSignal(str, object)
+    _signFinished = pyqtSignal(object)
 
     def __init__(self, wallet: 'Abstract_Wallet', parent=None):
         super().__init__(parent)
@@ -128,6 +130,8 @@ class QEWallet(AuthMixin, QObject, QtEventListener):
         self.sync_progress_timer.setSingleShot(False)
         self.sync_progress_timer.setInterval(2000)
         self.sync_progress_timer.timeout.connect(self.update_sync_progress)
+
+        self._signFinished.connect(self._on_sign_finished)
 
         # post-construction init in GUI thread
         # QMetaObject.invokeMethod(self, 'qt_init', Qt.QueuedConnection)
@@ -542,13 +546,36 @@ class QEWallet(AuthMixin, QObject, QtEventListener):
         sign_hook = run_hook('tc_sign_wrapper', self.wallet, tx,
                              partial(self.on_sign_complete, broadcast, on_success),
                              partial(self.on_sign_failed, None))
-        try:
-            # ignore_warnings=True, because UI checks and asks user confirmation itself
-            tx = self.wallet.sign_transaction(tx, self.password, ignore_warnings=True)
-        except BaseException as e:
-            self._logger.error(f'{e!r}')
+
+        def sign() -> tuple:
+            signed_tx, error = None, None
+            try:
+                # ignore_warnings=True, because UI checks and asks user confirmation itself
+                signed_tx = self.wallet.sign_transaction(tx, self.password, ignore_warnings=True)
+            except BaseException as e:
+                error = e
+            return signed_tx, error, broadcast, sign_hook, on_success, on_failure
+
+        if not any(isinstance(ks, Hardware_KeyStore) for ks in self.wallet.get_keystores()):
+            self._on_sign_finished(sign())
+            return
+
+        # signing with a hardware device blocks until the user confirms on the device, so sign in a thread.
+        # _signFinished hands the result back to the qt thread.
+        def sign_task():
+            result = sign()
+            with ignore_if_destroyed(self):
+                self._signFinished.emit(result)
+
+        threading.Thread(target=sign_task, daemon=True).start()
+
+    @pyqtSlot(object)
+    def _on_sign_finished(self, result: tuple):
+        tx, error, broadcast, sign_hook, on_success, on_failure = result
+        if error is not None:
+            self._logger.error(f'{error!r}')
             if on_failure:
-                on_failure(str(e))
+                on_failure(str(error))
             return
 
         if tx is None:
