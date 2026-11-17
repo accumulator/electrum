@@ -1105,6 +1105,7 @@ class Device(NamedTuple):
     transport_ui_string: str
     product_name: Optional[str] = None  # USB product name, used for matching hww subtypes (e.g. bitbox02)
     transport: Optional[DeviceTransport] = None
+    interfaces: Optional[Tuple[Tuple[int, int], ...]] = None  # (number, class) of each USB interface, if known
 
 
 class DeviceInfo(NamedTuple):

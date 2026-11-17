@@ -674,7 +674,10 @@ class ElectrumQmlApplication(QGuiApplication):
         for i in range(usb_devices.size()):
             usb_device = usb_devices.get(i)
             product_key = (usb_device.getVendorId(), usb_device.getProductId())
-            self.logger.info(f'USB: {repr(product_key)}: {usb_device.getProductName()} ({str(usb_device.getDeviceId())})')
+            usb_interfaces = [usb_device.getInterface(j) for j in range(usb_device.getInterfaceCount())]
+            # alternate settings of an interface are separate UsbInterfaces, hence the dedup
+            interfaces = tuple(dict.fromkeys((intf.getId(), intf.getInterfaceClass()) for intf in usb_interfaces))
+            self.logger.info(f'USB: {repr(product_key)}: {usb_device.getProductName()} ({str(usb_device.getDeviceId())}) {interfaces=}')
             devices.append(Device(
                 id_=str(usb_device.getDeviceId()),  # NOTE uniqueness internal
                 path=str(usb_device.getDeviceId()),  # NOTE used to request transport, android needs deviceid(?) to open.
@@ -684,7 +687,8 @@ class ElectrumQmlApplication(QGuiApplication):
                 transport_ui_string=usb_device.getProductName(),  # usb_device.getSerialNumber() requires permission first,
                 product_name=usb_device.getProductName(),
                 # NOTE transport_ui_string generic use, not provided by plugins but taken from hid enumerator
-                transport=DeviceTransport.HID  # assumed for now
+                transport=DeviceTransport.HID,  # assumed for now
+                interfaces=interfaces,
             ))
         return devices
 
