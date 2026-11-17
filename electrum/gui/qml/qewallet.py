@@ -397,6 +397,7 @@ class QEWallet(AuthMixin, QObject, QtEventListener):
                 'master_pubkey': (k.get_master_public_key() if k.is_deterministic() else '') or '',
                 'fingerprint': (k.get_root_fingerprint() if k.is_deterministic() else '') or '',
                 'num_imported': len(k.keypairs) if k.can_import() else 0,
+                'hww_pairing_code': k.pairing_code() if k.type == 'hardware' else '',
             })
         return result
 

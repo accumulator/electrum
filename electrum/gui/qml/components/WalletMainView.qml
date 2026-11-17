@@ -88,6 +88,17 @@ Item {
             } else {
                 // store txid in invoicedialog so the dialog can detect broadcast success
                 invoicedialog.broadcastTxid = dialog.finalizer.finalizedTxid
+                // prepare hww handler view if signing via hww
+                var hww_dialog
+                if (Daemon.currentWallet.isHardware) {
+                    var pcode = Daemon.currentWallet.keystores[0].hww_pairing_code
+                    console.log('HWW handler dialog for pairing code: ' + pcode)
+                    hww_dialog = hardwareHandlerDialog.createObject(mainView, {
+                        title: qsTr('Signing transaction with HW keystore'),
+                        pairing_code: pcode
+                    })
+                    hww_dialog.open()
+                }
                 dialog.finalizer.signAndSend()
             }
         })
@@ -701,6 +712,13 @@ Item {
         if (app.pendingIntent) {
             piResolver.recipient = app.pendingIntent
             app.pendingIntent = ""
+        }
+    }
+
+    Component {
+        id: hardwareHandlerDialog
+        HardwareHandlerDialog {
+
         }
     }
 }
