@@ -60,6 +60,7 @@ class QmlHandlerBase(HardwareHandlerBase, QObject, Logger):
     query_signal = pyqtSignal(object, object)
     yes_no_signal = pyqtSignal(object)
     status_signal = pyqtSignal(object)
+    xpub_available = pyqtSignal()  # xpub_data is set
 
     def __init__(self, device: str, parent=None):
         QObject.__init__(self, parent)
@@ -79,6 +80,7 @@ class QmlHandlerBase(HardwareHandlerBase, QObject, Logger):
         self.done = threading.Event()
 
         self._on_cancel_message = None
+        self.xpub_data = {}  # keystore data of the last xpub retrieval, set by QENewWalletWizard.hwwGetXpub
 
         if platform.is_android():
             from jnius import autoclass
@@ -282,6 +284,10 @@ class QmlHandlerBase(HardwareHandlerBase, QObject, Logger):
             'model_name': device_info.model_name,
             'plugin_name': device_info.plugin_name,
         }
+
+    @pyqtSlot(result='QVariantMap')
+    def xpubData(self):
+        return self.xpub_data
 
 
 class QmlPluginBase(Logger):

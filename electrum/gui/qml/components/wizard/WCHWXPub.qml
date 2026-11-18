@@ -12,6 +12,18 @@ WizardComponent {
     property QtObject deviceHandler: AppController.deviceHandler(wizard_data['hardware_uid'])
     property string message
 
+    function apply() {
+        var xpub_data = deviceHandler.xpubData()
+        // Nothing retrieved (yet), e.g. when checkIsLast() runs before the retrieval has finished.
+        if (!('master_key' in xpub_data))
+            return
+        wizard_data['hw_type'] = xpub_data['hw_type']
+        wizard_data['master_key'] = xpub_data['master_key']
+        wizard_data['root_fingerprint'] = xpub_data['root_fingerprint']
+        wizard_data['label'] = xpub_data['label']
+        wizard_data['soft_device_id'] = xpub_data['soft_device_id']
+    }
+
     ColumnLayout {
         width: parent.width
         spacing: constants.paddingLarge
@@ -67,7 +79,7 @@ WizardComponent {
             // msglabel.text = ''
             // root.valid = true
         }
-        function onPassword_available() {
+        function onXpub_available() {
             root.valid = true
         }
     }

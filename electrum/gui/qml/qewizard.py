@@ -156,6 +156,7 @@ class QENewWalletWizard(NewWalletWizard, QEAbstractWizard):
 
         xtype = cosigner_data['script_type']
         derivation = cosigner_data['derivation_path']
+        client.handler.xpub_data = {}  # the page must not apply data from a previous retrieval
 
         def get_xpub_task(_client, _derivation, _xtype):
             _client.handler.show_message('...')
@@ -176,10 +177,14 @@ class QENewWalletWizard(NewWalletWizard, QEAbstractWizard):
             if self.xpub:
                 self._logger.debug(f'Done retrieve xpub: {self.xpub[:10]}...{self.xpub[-5:]}')
                 _client.handler.show_message('xpub retrieved')
-
-
-            # self.busy = False
-            # self.validate()
+                _client.handler.xpub_data = {
+                    'hw_type': _client.plugin.name,
+                    'master_key': self.xpub,
+                    'root_fingerprint': self.root_fingerprint,
+                    'label': self.label,
+                    'soft_device_id': self.soft_device_id,
+                }
+                _client.handler.xpub_available.emit()
 
         t = threading.Thread(target=get_xpub_task, args=(client, derivation, xtype), daemon=True)
         t.start()
