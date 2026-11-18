@@ -138,6 +138,7 @@ RUN apt -y update -q \
         automake \
         gettext \
         libltdl-dev \
+        rustup \
     && apt -y autoremove \
     && apt -y clean
 
@@ -162,6 +163,40 @@ ENV PATH="${HOME_DIR}/.local/bin:${PATH}"
 WORKDIR ${WORK_DIR}
 RUN chown -R user ${WORK_DIR} ${ANDROID_SDK_HOME} /opt
 USER user
+
+# rust toolchain, pinned by the sha256 of its channel manifest, which in turn lists the sha256 of
+# every component. rustup installs from a local dist mirror holding that manifest and the components
+# we need, and verifies each component against the manifest.
+# (Note: rustup must run as 'user', keep after 'USER user')
+# upgrading later: change the next three ENVs
+ENV RUST_TOOLCHAIN_VERSION="1.100.0"
+ENV RUST_TOOLCHAIN_DATE="2026-11-12"
+ENV RUST_MANIFEST_HASH="3051e859570f64a8c5acb9d09e87425db52c7d97287c67e8f6d57d7d34ef9258"
+
+ENV RUST_ANDROID_TARGETS="aarch64-linux-android armv7-linux-androideabi x86_64-linux-android"
+RUN RUST_DL_URL="https://static.rust-lang.org/dist" \
+    && RUST_MIRROR="/tmp/rust-dist" \
+    && RUST_MANIFEST="channel-rust-${RUST_TOOLCHAIN_VERSION}.toml" \
+    && mkdir --parents "${RUST_MIRROR}/dist/${RUST_TOOLCHAIN_DATE}" \
+    && cd "${RUST_MIRROR}/dist" \
+    && curl --fail --location --silent --show-error --remote-name "${RUST_DL_URL}/${RUST_MANIFEST}" \
+    && echo "${RUST_MANIFEST_HASH}  ${RUST_MANIFEST}" | tee "${RUST_MANIFEST}.sha256" | sha256sum -c - \
+    && cd "${RUST_TOOLCHAIN_DATE}" \
+    && for pkg in rustc cargo rust-std; do \
+           curl --fail --location --silent --show-error --remote-name \
+               "${RUST_DL_URL}/${RUST_TOOLCHAIN_DATE}/${pkg}-${RUST_TOOLCHAIN_VERSION}-x86_64-unknown-linux-gnu.tar.xz" \
+           || exit 1; \
+       done \
+    && for target in ${RUST_ANDROID_TARGETS}; do \
+           curl --fail --location --silent --show-error --remote-name \
+               "${RUST_DL_URL}/${RUST_TOOLCHAIN_DATE}/rust-std-${RUST_TOOLCHAIN_VERSION}-${target}.tar.xz" \
+           || exit 1; \
+       done \
+    && export RUSTUP_DIST_SERVER="file://${RUST_MIRROR}" \
+    && rustup set profile minimal \
+    && rustup default "${RUST_TOOLCHAIN_VERSION}" \
+    && rustup target add ${RUST_ANDROID_TARGETS} \
+    && rm -rf "${RUST_MIRROR}"
 
 # build cpython. FIXME we can't use the python3 from apt, as it is too new o.O
 # - p4a and buildozer require cython<3 (see https://github.com/kivy/python-for-android/issues/2919)

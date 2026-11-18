@@ -79,6 +79,7 @@ requirements =
     libffi,
     libsecp256k1,
     pycryptodomex,
+    cryptography,
     pyqt6sip,
     pyqt6,
     libzxing,
