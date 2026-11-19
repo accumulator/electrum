@@ -1218,7 +1218,7 @@ class DeviceMgr(ThreadJob):
         # A pairing_code->id_ map. Item only present if we have active pairing. Needs self.lock.
         self.pairing_code_to_id = {}  # type: Dict[str, str]
         # A client->id_ map. Needs self.lock.
-        self.clients = {}  # type: Dict[HardwareClientBase, str]
+        self._clients = {}  # type: Dict[HardwareClientBase, str]
         # What we recognise.  (vendor_id, product_id) -> Plugin
         self._recognised_hardware = {}  # type: Dict[Tuple[int, int], HW_PluginBase]
         self._recognised_vendor = {}  # type: Dict[int, HW_PluginBase]  # vendor_id -> Plugin
@@ -1230,6 +1230,12 @@ class DeviceMgr(ThreadJob):
 
         self.config = config
 
+    @property
+    def clients(self) -> Dict['HardwareClientBase', str]:
+        """A copy of the client->id_ map, taken under the lock"""
+        with self.lock:
+            return dict(self._clients)
+
     def thread_jobs(self):
         # Thread job to handle device timeouts
         return [self]
@@ -1237,10 +1243,8 @@ class DeviceMgr(ThreadJob):
     def run(self):
         """Handle device timeouts.  Runs in the context of the Plugins
         thread."""
-        with self.lock:
-            clients = list(self.clients.items())
         cutoff = time.time() - self.config.get_session_timeout()
-        for client, client_id in clients:
+        for client, client_id in self.clients.items():
             if fut := self._ongoing_timeout_checks.get(client_id):
                 if not fut.done():
                     continue
@@ -1272,7 +1276,7 @@ class DeviceMgr(ThreadJob):
         if client:
             self.logger.info(f"Registering {client}")
             with self.lock:
-                self.clients[client] = device.id_
+                self._clients[client] = device.id_
         return client
 
     def id_by_pairing_code(self, pairing_code):
@@ -1307,7 +1311,7 @@ class DeviceMgr(ThreadJob):
     def _forget_client(self, id_) -> Optional['HardwareClientBase']:
         with self.lock:
             client = self._client_by_id(id_)
-            self.clients.pop(client, None)
+            self._clients.pop(client, None)
             if fut := self._ongoing_timeout_checks.pop(id_, None):
                 fut.cancel()
         return client
@@ -1348,10 +1352,9 @@ class DeviceMgr(ThreadJob):
             client.handler.update_status(False)
 
     def _client_by_id(self, id_) -> Optional['HardwareClientBase']:
-        with self.lock:
-            for client, client_id in self.clients.items():
-                if client_id == id_:
-                    return client
+        for client, client_id in self.clients.items():
+            if client_id == id_:
+                return client
         return None
 
     def client_by_id(self, id_, *, scan_now: bool = True) -> Optional['HardwareClientBase']:
@@ -1604,7 +1607,7 @@ class DeviceMgr(ThreadJob):
         # find out what was disconnected
         client_ids = [dev.id_ for dev in devices]
         with self.lock:
-            disconnected_ids = [id_ for client, id_ in self.clients.items()
+            disconnected_ids = [id_ for client, id_ in self._clients.items()
                                 if id_ not in client_ids or not client.has_usable_connection_with_device()]
         for id_ in disconnected_ids:
             self.on_device_removed(id_)

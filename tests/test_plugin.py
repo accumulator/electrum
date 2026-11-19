@@ -191,7 +191,7 @@ class DeviceMgrTestCase(ElectrumTestCase):
         self.devmgr = DeviceMgr(SimpleConfig({'electrum_path': self.electrum_path}))
         self.handler = FakeHandler()
         self.client = FakeClient(self.handler)
-        self.devmgr.clients[self.client] = 'dev1'
+        self.devmgr._clients[self.client] = 'dev1'
         self.devmgr.pairing_code_to_id['bitbox02/abc'] = 'dev1'
 
     def _block_hwd_thread(self) -> threading.Event:
