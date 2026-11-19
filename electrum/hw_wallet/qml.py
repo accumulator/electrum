@@ -261,7 +261,8 @@ class QmlHandlerBase(HardwareHandlerBase, QObject, Logger):
         # find client by device_uid
         from electrum.gui.qml.qedaemon import QEDaemon
         client = QEDaemon.instance.plugins.device_manager._client_by_id(self.device)
-        client.abort()
+        if client:  # None once the device is gone
+            client.abort()
 
     @pyqtSlot(str, result=str)
     def icon(self, id_):
@@ -277,6 +278,8 @@ class QmlHandlerBase(HardwareHandlerBase, QObject, Logger):
     def deviceInfo(self):
         from electrum.gui.qml.qedaemon import QEDaemon
         client = QEDaemon.instance.plugins.device_manager._client_by_id(self.device)
+        if not client:  # the device is gone
+            return {}
         device_info: DeviceInfo = client.get_device_info_for_enumeration()
         return {
             'label': device_info.label,
