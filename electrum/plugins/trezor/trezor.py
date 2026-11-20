@@ -237,7 +237,7 @@ class TrezorPlugin(HW_PluginBase):
 
         self.logger.info(f"connected to device at {device_descriptor.path}")
         # note that this call can still raise!
-        return TrezorClientBase(device_descriptor, transport, handler, self)
+        return TrezorClientBase(device_descriptor, transport, self)
 
     @runs_in_hwd_thread
     def get_client(self, keystore, force_pair=True, *,

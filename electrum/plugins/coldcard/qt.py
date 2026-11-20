@@ -154,7 +154,6 @@ class CKCCSettingsDialog(WindowModalDialog):
 
         devmgr = plugin.device_manager()
         #config = devmgr.config
-        #handler = keystore.handler
         self.thread = thread = keystore.thread
         self.keystore = keystore
         assert isinstance(window, ElectrumWindow), f"{type(window)}"

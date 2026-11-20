@@ -1208,9 +1208,8 @@ class WCChooseHWDevice(WalletWizardComponent, Logger):
                         continue
                     # see if plugin recognizes 'scanned_devices'
                     try:
-                        # FIXME: side-effect: this sets client.handler
                         device_infos = devmgr.list_pairable_device_infos(
-                            handler=None, plugin=plugin, devices=scanned_devices, include_failing_clients=True)
+                            plugin=plugin, devices=scanned_devices, include_failing_clients=True)
                     except HardwarePluginLibraryUnavailable as e:
                         failed_getting_device_infos(name, e)
                         continue
@@ -1283,6 +1282,7 @@ class WCWalletPasswordHardware(WalletWizardComponent):
             self.valid = False
             self.error = _("Client for hardware device was unpaired.")
             return
+        self.wizard.claim_hw_client(client)
 
         def retrieve_password_task():
             try:
@@ -1341,7 +1341,7 @@ class WCHWUnlock(WalletWizardComponent, Logger):
         _info = client.get_device_info_for_enumeration()
         self.title = _('Unlocking {} ({})').format(_info.model_name, _info.label)
         self.plugin = client.plugin
-        client.handler = self.plugin.create_handler(self.wizard)
+        self.wizard.claim_hw_client(client)
 
         def unlock_task(client):
             try:
@@ -1423,8 +1423,7 @@ class WCHWXPub(WalletWizardComponent, Logger):
         self.plugin = client.plugin
         _info = client.get_device_info_for_enumeration()
         self.title = _('Retrieving extended public key from {} ({})').format(_info.model_name, _info.label)
-        if not client.handler:
-            client.handler = self.plugin.create_handler(self.wizard)
+        self.wizard.claim_hw_client(client)
 
         xtype = cosigner_data['script_type']
         derivation = cosigner_data['derivation_path']

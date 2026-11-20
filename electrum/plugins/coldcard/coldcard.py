@@ -64,8 +64,8 @@ CKCC_SIMULATED_PID = CKCC_PID ^ 0x55aa
 
 
 class CKCCClient(HardwareClientBase):
-    def __init__(self, plugin, handler, device: 'Device', *, is_simulator=False):
-        HardwareClientBase.__init__(self, plugin=plugin, device_descriptor=device, handler=handler)
+    def __init__(self, plugin, device: 'Device', *, is_simulator=False):
+        HardwareClientBase.__init__(self, plugin=plugin, device_descriptor=device)
         dev_path = device.path
         self.device = plugin.device
 
@@ -304,7 +304,7 @@ class Coldcard_KeyStore(Hardware_KeyStore):
     def give_error(self, message: str | BaseException):
         self.logger.info(message)
         if not self.ux_busy:
-            self.handler.show_error(str(message))
+            self.get_handler().show_error(str(message))
         else:
             self.ux_busy = False
         raise UserFacingException(message)
@@ -326,14 +326,15 @@ class Coldcard_KeyStore(Hardware_KeyStore):
     def sign_message(self, sequence, message, password, *, script_type=None):
         # Sign a message on device. Since we have big screen, of course we
         # have to show the message unabiguously there first!
+        handler = self.get_handler()
         try:
             msg = message.encode('ascii', errors='strict')
             assert 1 <= len(msg) <= MSG_SIGNING_MAX_LENGTH
         except (UnicodeError, AssertionError):
             # there are other restrictions on message content,
             # but let the device enforce and report those
-            self.handler.show_error('Only short (%d max) ASCII messages can be signed.'
-                                            % MSG_SIGNING_MAX_LENGTH)
+            handler.show_error('Only short (%d max) ASCII messages can be signed.'
+                               % MSG_SIGNING_MAX_LENGTH)
             return b''
 
         path = self.get_derivation_prefix() + ("/%d/%d" % sequence)
@@ -346,7 +347,7 @@ class Coldcard_KeyStore(Hardware_KeyStore):
         try:
             cl = self.get_client()
             try:
-                self.handler.show_message("Signing message (using %s)..." % path)
+                handler.show_message("Signing message (using %s)..." % path)
 
                 cl.sign_message_start(path, msg, addr_fmt)
 
@@ -359,7 +360,7 @@ class Coldcard_KeyStore(Hardware_KeyStore):
                         break
 
             finally:
-                self.handler.finished()
+                handler.finished()
 
             assert len(resp) == 2
             addr, raw_sig = resp
@@ -370,10 +371,10 @@ class Coldcard_KeyStore(Hardware_KeyStore):
             return raw_sig
 
         except (CCUserRefused, CCBusyError) as exc:
-            self.handler.show_error(str(exc))
+            handler.show_error(str(exc))
         except CCProtoError as exc:
             self.logger.exception('Error showing address')
-            self.handler.show_error('{}\n\n{}'.format(
+            handler.show_error('{}\n\n{}'.format(
                 _('Error showing address') + ':', str(exc)))
         except Exception as e:
             self.give_error(e)
@@ -385,6 +386,7 @@ class Coldcard_KeyStore(Hardware_KeyStore):
     def sign_transaction(self, tx, password):
         # Upload PSBT for signing.
         # - we can also work offline (without paired device present)
+        handler = self.get_handler()
         if tx.is_complete():
             return
 
@@ -396,7 +398,7 @@ class Coldcard_KeyStore(Hardware_KeyStore):
 
         try:
             try:
-                self.handler.show_message("Authorize Transaction...")
+                handler.show_message("Authorize Transaction...")
 
                 client.sign_transaction_start(raw_psbt)
 
@@ -414,11 +416,11 @@ class Coldcard_KeyStore(Hardware_KeyStore):
                 raw_resp = client.download_file(rlen, rsha)
 
             finally:
-                self.handler.finished()
+                handler.finished()
 
         except (CCUserRefused, CCBusyError) as exc:
             self.logger.info(f'Did not sign: {exc}')
-            self.handler.show_error(str(exc))
+            handler.show_error(str(exc))
             return
         except BaseException as e:
             self.logger.exception('')
@@ -444,45 +446,47 @@ class Coldcard_KeyStore(Hardware_KeyStore):
 
     @wrap_busy
     def show_address(self, sequence, txin_type):
+        handler = self.get_handler()
         client = self.get_client()
         address_path = self.get_derivation_prefix()[2:] + "/%d/%d"%sequence
         addr_fmt = self._encode_txin_type(txin_type)
         try:
             try:
-                self.handler.show_message(_("Showing address ..."))
+                handler.show_message(_("Showing address ..."))
                 dev_addr = client.show_address(address_path, addr_fmt)
                 # we could double check address here
             finally:
-                self.handler.finished()
+                handler.finished()
         except CCProtoError as exc:
             self.logger.exception('Error showing address')
-            self.handler.show_error('{}\n\n{}'.format(
+            handler.show_error('{}\n\n{}'.format(
                 _('Error showing address') + ':', str(exc)))
         except BaseException as exc:
             self.logger.exception('')
-            self.handler.show_error(str(exc))
+            handler.show_error(str(exc))
 
     @wrap_busy
     def show_p2sh_address(self, M, script, xfp_paths, txin_type):
+        handler = self.get_handler()
         client = self.get_client()
         addr_fmt = self._encode_txin_type(txin_type)
         try:
             try:
-                self.handler.show_message(_("Showing address ..."))
+                handler.show_message(_("Showing address ..."))
                 dev_addr = client.show_p2sh_address(M, xfp_paths, script, addr_fmt=addr_fmt)
                 # we could double check address here
             finally:
-                self.handler.finished()
+                handler.finished()
         except CCProtoError as exc:
             self.logger.exception('Error showing address')
-            self.handler.show_error('{}.\n{}\n\n{}'.format(
+            handler.show_error('{}.\n{}\n\n{}'.format(
                 _('Error showing address'),
                 _('Make sure you have imported the correct wallet description '
                   'file on the device for this multisig wallet.'),
                 str(exc)))
         except BaseException as exc:
             self.logger.exception('')
-            self.handler.show_error(str(exc))
+            handler.show_error(str(exc))
 
 
 class ColdcardPlugin(HW_PluginBase):
@@ -538,7 +542,7 @@ class ColdcardPlugin(HW_PluginBase):
         # Not sure why not we aren't just given a HID library handle, but
         # the 'path' is unabiguous, so we'll use that.
         try:
-            rv = CKCCClient(self, handler, device_descriptor,
+            rv = CKCCClient(self, device_descriptor,
                             is_simulator=(device_descriptor.product_key[1] == CKCC_SIMULATED_PID))
             return rv
         except Exception as e:
@@ -620,7 +624,7 @@ class ColdcardPlugin(HW_PluginBase):
             keystore.show_p2sh_address(wallet.m, script, xfp_paths, txin_type)
 
         else:
-            keystore.handler.show_error(_('This function is only available for standard wallets when using {}.').format(self.device))
+            keystore.get_handler().show_error(_('This function is only available for standard wallets when using {}.').format(self.device))
             return
 
     def wizard_entry_for_device(self, device_info: 'DeviceInfo', *, new_wallet=True) -> str:

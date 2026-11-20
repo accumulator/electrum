@@ -433,7 +433,7 @@ class Ledger_Client_Legacy(Ledger_Client):
     def give_error(self, message: str | BaseException):
         _logger.info(message)
         if not self.signing:
-            self.handler.show_error(str(message))
+            self.get_handler().show_error(str(message))
         else:
             self.signing = False
         raise UserFacingException(message)
@@ -485,7 +485,6 @@ class Ledger_Client_Legacy(Ledger_Client):
         # it manually from the previous node
         # This only happens once so it's bearable
         # self.get_client() # prompt for the PIN before displaying the dialog if necessary
-        # self.handler.show_message("Computing master public key")
         if xtype in ['p2wpkh', 'p2wsh'] and not self.supports_native_segwit():
             raise UserFacingException(MSG_NEEDS_FW_UPDATE_SEGWIT)
         if xtype in ['p2wpkh-p2sh', 'p2wsh-p2sh'] and not self.supports_segwit():
@@ -555,7 +554,7 @@ class Ledger_Client_Legacy(Ledger_Client):
         self.segwitTrustedInputs = versiontuple(firmware) >= versiontuple(SEGWIT_TRUSTEDINPUTS)
 
     def password_dialog(self, msg=None):
-        response = self.handler.get_word(msg)
+        response = self.get_handler().get_word(msg)
         if response is None:
             return False, None, None
         return True, response, response
@@ -564,7 +563,8 @@ class Ledger_Client_Legacy(Ledger_Client):
     @test_pin_unlocked
     @set_and_unset_signing
     def show_address(self, address_path: str, txin_type: str):
-        self.handler.show_message(_("Showing address ..."))
+        handler = self.get_handler()
+        handler.show_message(_("Showing address ..."))
         segwit = is_segwit_script_type(txin_type)
         segwitNative = txin_type == 'p2wpkh'
         try:
@@ -575,23 +575,24 @@ class Ledger_Client_Legacy(Ledger_Client):
             elif e.sw == 0x6982:
                 raise  # pin lock. decorator will catch it
             elif e.sw == 0x6b00:  # hw.1 raises this
-                self.handler.show_error('{}\n{}\n{}'.format(
+                handler.show_error('{}\n{}\n{}'.format(
                     _('Error showing address') + ':',
                     e,
                     _('Your device might not have support for this functionality.')))
             else:
                 _logger.exception('')
-                self.handler.show_error(str(e))
+                handler.show_error(str(e))
         except BaseException as e:
             _logger.exception('')
-            self.handler.show_error(str(e))
+            handler.show_error(str(e))
         finally:
-            self.handler.finished()
+            handler.finished()
 
     @runs_in_hwd_thread
     @test_pin_unlocked
     @set_and_unset_signing
     def sign_transaction(self, keystore: Hardware_KeyStore, tx: PartialTransaction, password: str):
+        handler = self.get_handler()
         if tx.is_complete():
             return
 
@@ -680,7 +681,7 @@ class Ledger_Client_Legacy(Ledger_Client):
         try:
             # Get trusted inputs from the original transactions
             for input_idx, utxo in enumerate(inputs):
-                self.handler.show_message(_("Preparing transaction inputs...") + f" (phase1, {input_idx}/{len(inputs)})")
+                handler.show_message(_("Preparing transaction inputs...") + f" (phase1, {input_idx}/{len(inputs)})")
                 sequence = int.to_bytes(utxo[5], length=4, byteorder="little", signed=False).hex()
                 if segwitTransaction and not self.supports_segwit_trustedInputs():
                     tmp = bfh(utxo[3])[::-1]
@@ -705,7 +706,7 @@ class Ledger_Client_Legacy(Ledger_Client):
                     chipInputs.append({'value': tmp, 'sequence': sequence})
                     redeemScripts.append(bfh(utxo[2]))
 
-            self.handler.show_message(_("Confirm Transaction on your Ledger device..."))
+            handler.show_message(_("Confirm Transaction on your Ledger device..."))
             # Sign all inputs
             firstTransaction = True
             inputIndex = 0
@@ -716,7 +717,7 @@ class Ledger_Client_Legacy(Ledger_Client):
                 # as we only care about the alternateEncoding==True branch
                 outputData = self.dongleObject.finalizeInput(b'', 0, 0, changePath, bfh(rawTx))
                 while inputIndex < len(inputs):
-                    self.handler.show_message(_("Signing transaction...") + f" (phase2, {inputIndex}/{len(inputs)})")
+                    handler.show_message(_("Signing transaction...") + f" (phase2, {inputIndex}/{len(inputs)})")
                     singleInput = [chipInputs[inputIndex]]
                     self.dongleObject.startUntrustedTransaction(False, 0,
                                                                 singleInput, redeemScripts[inputIndex], version=tx.version)
@@ -729,7 +730,7 @@ class Ledger_Client_Legacy(Ledger_Client):
                     inputIndex = inputIndex + 1
             else:
                 while inputIndex < len(inputs):
-                    self.handler.show_message(_("Signing transaction...") + f" (phase2, {inputIndex}/{len(inputs)})")
+                    handler.show_message(_("Signing transaction...") + f" (phase2, {inputIndex}/{len(inputs)})")
                     self.dongleObject.startUntrustedTransaction(firstTransaction, inputIndex, chipInputs, redeemScripts[inputIndex], version=tx.version)
                     # we don't set meaningful outputAddress, amount and fees
                     # as we only care about the alternateEncoding==True branch
@@ -744,7 +745,7 @@ class Ledger_Client_Legacy(Ledger_Client):
                     inputIndex = inputIndex + 1
                     firstTransaction = False
         except UserWarning:
-            self.handler.show_error(_('Cancelled by user'))
+            handler.show_error(_('Cancelled by user'))
             return
         except BTChipException as e:
             if e.sw in (0x6985, 0x6d00):  # cancelled by user
@@ -758,7 +759,7 @@ class Ledger_Client_Legacy(Ledger_Client):
             _logger.exception('')
             self.give_error(e)
         finally:
-            self.handler.finished()
+            handler.finished()
 
     @runs_in_hwd_thread
     @test_pin_unlocked
@@ -771,10 +772,11 @@ class Ledger_Client_Legacy(Ledger_Client):
             *,
             script_type: Optional[str] = None,
     ) -> bytes:
+        handler = self.get_handler()
         message = message.encode('utf8')
         message_hash = hashlib.sha256(message).hexdigest().upper()
 
-        self.handler.show_message("Signing message ...\r\nMessage hash: " + message_hash)
+        handler.show_message("Signing message ...\r\nMessage hash: " + message_hash)
         try:
             info = self.dongleObject.signMessagePrepare(address_path, message)
             pin = ""
@@ -791,12 +793,12 @@ class Ledger_Client_Legacy(Ledger_Client):
             else:
                 self.give_error(e)
         except UserWarning:
-            self.handler.show_error(_('Cancelled by user'))
+            handler.show_error(_('Cancelled by user'))
             return b''
         except Exception as e:
             self.give_error(e)
         finally:
-            self.handler.finished()
+            handler.finished()
         # Parse the ASN.1 signature
         rLength = signature[3]
         r = signature[4: 4 + rLength]
@@ -958,7 +960,7 @@ class Ledger_Client_New(Ledger_Client):
         return WalletPolicy(name, descriptor_template, [key_info])
 
     def password_dialog(self, msg=None):
-        response = self.handler.get_word(msg)
+        response = self.get_handler().get_word(msg)
         if response is None:
             return False, None, None
         return True, response, response
@@ -975,8 +977,9 @@ class Ledger_Client_New(Ledger_Client):
     @runs_in_hwd_thread
     @test_pin_unlocked
     def show_address(self, address_path: str, txin_type: str):
+        handler = self.get_handler()
         client_ledger = self.client
-        self.handler.show_message(_("Showing address ..."))
+        handler.show_message(_("Showing address ..."))
 
         # TODO: generalize for multisignature
 
@@ -995,13 +998,14 @@ class Ledger_Client_New(Ledger_Client):
             pass  # cancelled by user
         except BaseException as e:
             _logger.exception('Error while showing an address')
-            self.handler.show_error(str(e))
+            handler.show_error(str(e))
         finally:
-            self.handler.finished()
+            handler.finished()
 
     @runs_in_hwd_thread
     @test_pin_unlocked
     def sign_transaction(self, keystore: Hardware_KeyStore, tx: PartialTransaction, password: str):
+        handler = self.get_handler()
         if tx.is_complete():
             return
 
@@ -1159,7 +1163,7 @@ class Ledger_Client_New(Ledger_Client):
                         if key == psbt_in.tap_internal_key and origin.fingerprint == master_fp:
                             process_origin(origin)
 
-            self.handler.show_message(_("Confirm Transaction on your Ledger device..."))
+            handler.show_message(_("Confirm Transaction on your Ledger device..."))
 
             if len(wallets) == 0:
                 # Could not find a WalletPolicy to sign with
@@ -1175,9 +1179,9 @@ class Ledger_Client_New(Ledger_Client):
             pass  # cancelled by user
         except BaseException as e:
             _logger.exception('Error while signing')
-            self.handler.show_error(str(e))
+            handler.show_error(str(e))
         finally:
-            self.handler.finished()
+            handler.finished()
 
     @runs_in_hwd_thread
     @test_pin_unlocked
@@ -1189,10 +1193,11 @@ class Ledger_Client_New(Ledger_Client):
             *,
             script_type: Optional[str] = None,
     ) -> bytes:
+        handler = self.get_handler()
         message = message.encode('utf8')
         message_hash = hashlib.sha256(message).hexdigest().upper()
         # prompt for the PIN before displaying the dialog if necessary
-        self.handler.show_message("Signing message ...\r\nMessage hash: " + message_hash)
+        handler.show_message("Signing message ...\r\nMessage hash: " + message_hash)
 
         result = b''
         try:
@@ -1202,9 +1207,9 @@ class Ledger_Client_New(Ledger_Client):
             pass  # cancelled by user
         except BaseException as e:
             _logger.exception('')
-            self.handler.show_error(str(e))
+            handler.show_error(str(e))
         finally:
-            self.handler.finished()
+            handler.finished()
 
         return result
 
@@ -1378,7 +1383,7 @@ class LedgerPlugin(HW_PluginBase):
         if not self.show_address_helper(wallet, address, keystore):
             return
         if type(wallet) is not Standard_Wallet:
-            keystore.handler.show_error(_('This function is only available for standard wallets when using {}.').format(self.device))
+            keystore.get_handler().show_error(_('This function is only available for standard wallets when using {}.').format(self.device))
             return
         sequence = wallet.get_address_index(address)
         txin_type = wallet.get_txin_type(address)

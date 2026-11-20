@@ -4,6 +4,7 @@ from unittest import mock
 from electrum import SimpleConfig
 from electrum.interface import ServerAddr
 from electrum.keystore import bip44_derivation, Hardware_KeyStore, KeyStore, BIP32_KeyStore
+from electrum.hw_wallet import constant_handler_delegate
 from electrum.network import NetworkParameters, ProxySettings
 from electrum.plugin import Plugins, DeviceInfo, Device
 from electrum.wizard import ServerConnectWizard, NewWalletWizard, WizardViewState, KeystoreWizard
@@ -539,10 +540,15 @@ class KeystoreWizardTestCase(WizardTestCase):
         wallet.enable_keystore(ks, ishww, None)
         self.assertFalse(wallet.get_keystore().is_watching_only())
         self.assertTrue(isinstance(wallet.get_keystore(), Hardware_KeyStore))
+        self.assertIs(wallet, wallet.get_keystore().get_wallet())
+        ks.set_handler_delegate(constant_handler_delegate(object()))  # as a GUI would
 
         my_keyorigininfo = wallet.get_keystore().get_key_origin_info()
-        wallet.disable_keystore(wallet.get_keystore())
+        wallet.disable_keystore(ks)
         self._sanity_checks_after_disabling_keystore(ks=wallet.get_keystore(), xpub=myxpub, key_origin_info=my_keyorigininfo)
+        # the disabled keystore is detached
+        self.assertIsNone(ks.get_wallet())
+        self.assertIsNone(ks.get_handler())
 
     async def test_multisig(self):
         seed1 = "bitter grass shiver impose acquire brush forget axis eager alone wine silver"
@@ -1194,6 +1200,7 @@ class WalletWizardTestCase(WizardTestCase):
         self.assertEqual("bc1q7ltf4aq95rj695fu5aaa5mx5m9p55xyr2fy6y0", wallet.get_receiving_addresses()[0])
         self.assertTrue(wallet.has_password())
         self.assertTrue(wallet.has_storage_encryption())
+        self.assertIs(wallet, wallet.get_keystore().get_wallet())
 
     async def test_unlock_hw_trezor(self):
         # bip39 seed for trezor: "history six okay anchor sheriff flock atom tomorrow foster aerobic eternal foam"
@@ -1356,7 +1363,10 @@ class WalletWizardTestCase(WizardTestCase):
         d['multisig_cosigner_data']['6'].update({
             'master_key': 'ZprvAjWENdvYc1Ctvppxm4Z67U4EoiDy5VXKNvWmVAZshy7UjgKggu1UcAH7MqRqTaHVunuEPZ7o51wCrsZnJXPJtzHnAoxNmMLWFMHC7uvUN5P'})
         v = w.resolve_next(v.view, d)
-        self._set_password_and_check_address(v=v, w=w, recv_addr="bc1qtuzp7rectyjquax5c3p80eletswhp6cxslye749l47h4m9x92hzs6cmymy")
+        wallet = self._set_password_and_check_address(v=v, w=w, recv_addr="bc1qtuzp7rectyjquax5c3p80eletswhp6cxslye749l47h4m9x92hzs6cmymy")
+        hw_keystores = [ks for ks in wallet.get_keystores() if isinstance(ks, Hardware_KeyStore)]
+        self.assertEqual(1, len(hw_keystores))
+        self.assertIs(wallet, hw_keystores[0].get_wallet())
 
     async def test_create_imported_wallet_from_addresses(self):
         w = self._wizard_for(wallet_type='imported')

@@ -3,10 +3,10 @@ from .clientbase import KeepKeyClientBase
 
 
 class KeepKeyClient(KeepKeyClientBase, ProtocolMixin, BaseClient):
-    def __init__(self, device_descriptor, transport, handler, plugin):
+    def __init__(self, device_descriptor, transport, plugin):
         BaseClient.__init__(self, transport)
         ProtocolMixin.__init__(self, transport)
-        KeepKeyClientBase.__init__(self, device_descriptor, handler, plugin, proto)
+        KeepKeyClientBase.__init__(self, device_descriptor, plugin, proto)
 
     def recovery_device(self, *args):
         ProtocolMixin.recovery_device(self, False, *args)

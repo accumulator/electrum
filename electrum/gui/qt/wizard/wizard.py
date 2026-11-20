@@ -1,7 +1,8 @@
 import copy
 import threading
+import weakref
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Dict, MutableSet
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot, QSize, QMetaObject
 from PyQt6.QtGui import QPixmap
@@ -16,6 +17,8 @@ if TYPE_CHECKING:
     from electrum.simple_config import SimpleConfig
     from electrum.gui.qt import QElectrumApplication
     from electrum.wizard import WizardViewState
+    from electrum.hw_wallet import HardwareClientBase
+    from electrum.hw_wallet.qt import QtHandlerBase
 
 
 class QEAbstractWizard(QDialog, MessageBoxMixin):
@@ -115,6 +118,11 @@ class QEAbstractWizard(QDialog, MessageBoxMixin):
 
         self.start_viewstate = start_viewstate
 
+        # hardware devices route their user interaction to the wizard while it uses them, see claim_hw_client
+        self._hw_handlers = {}  # type: Dict[str, QtHandlerBase]  # plugin name -> handler
+        self._hw_clients = weakref.WeakSet()  # type: MutableSet[HardwareClientBase]
+        self.finished.connect(self._release_hw_clients)
+
         self.show()
         self.raise_()
 
@@ -122,6 +130,25 @@ class QEAbstractWizard(QDialog, MessageBoxMixin):
 
     def sizeHint(self) -> QSize:
         return QSize(600, 400)
+
+    def claim_hw_client(self, client: 'HardwareClientBase') -> 'QtHandlerBase':
+        """Routes the user interaction of client to this wizard, until another user takes it over,
+        e.g. a wallet window. Returns the handler that gets it."""
+        plugin = client.plugin
+        handler = self._hw_handlers.get(plugin.name)
+        if handler is None:
+            handler = self._hw_handlers[plugin.name] = plugin.create_handler(self)
+        client.set_handler_delegate(self._hw_handler_delegate)
+        self._hw_clients.add(client)
+        return handler
+
+    def _hw_handler_delegate(self, *, keystore, client):
+        return self._hw_handlers.get(client.plugin.name)
+
+    def _release_hw_clients(self):
+        for client in list(self._hw_clients):
+            client.release_handler_delegate(self._hw_handler_delegate)
+        self._hw_clients.clear()
 
     @pyqtSlot()
     def strt(self):

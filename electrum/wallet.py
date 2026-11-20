@@ -458,6 +458,8 @@ class Abstract_Wallet(ABC, Logger, EventListener):
         self._freeze_lock = threading.RLock()  # for mutating/iterating frozen_{addresses,coins}
 
         self.load_keystore()
+        for keystore in self.get_keystores():
+            self._link_keystore(None, keystore)
         self.txbatcher = TxBatcher(self)
         self._init_lnworker()
         self._init_requests_rhash_index()
@@ -3535,6 +3537,13 @@ class Abstract_Wallet(ABC, Logger, EventListener):
     def _update_keystore(self, keystore: KeyStore) -> None:
         raise NotImplementedError()
 
+    def _link_keystore(self, old: Optional[KeyStore], new: Optional[KeyStore]) -> None:
+        """Lets hardware keystores find their wallet, e.g. to register a multisig wallet on the device."""
+        if isinstance(old, Hardware_KeyStore):
+            old.set_wallet(None)
+        if isinstance(new, Hardware_KeyStore):
+            new.set_wallet(self)
+
     @abstractmethod
     def has_seed(self) -> bool:
         pass
@@ -4462,11 +4471,15 @@ class Deterministic_Wallet(Abstract_Wallet):
             raise Exception("cannot disable keystore: needed by lightning")
         if hasattr(keystore, 'thread') and keystore.thread:
             keystore.thread.stop()
+            keystore.thread = None
         if self.storage.is_encrypted_with_hw_device():
             password = keystore.get_password_for_storage_encryption()
             self.update_password(password, None, encrypt_storage=False)
         new = keystore.watching_only_keystore()
         self._update_keystore(new)
+        if isinstance(keystore, Hardware_KeyStore):
+            # its window no longer sees it, so it would not be detached when the window closes
+            keystore.plugin.close_keystore(keystore)
         if not self.can_have_keystore_encryption():
             # no keystore left that can be encrypted. Without storage encryption,
             # the wallet no longer has a password.
@@ -4518,6 +4531,7 @@ class Standard_Wallet(Simple_Wallet, Deterministic_Wallet):
     def _update_keystore(self, keystore):
         if self.keystore.get_master_public_key() != keystore.get_master_public_key():
             raise Exception("mismatching xpubs")
+        self._link_keystore(self.keystore, keystore)
         self.keystore = keystore
         self.save_keystore()
 
@@ -4578,6 +4592,7 @@ class Multisig_Wallet(Deterministic_Wallet):
                 break
         else:
             raise Exception('keystore not found')
+        self._link_keystore(k, keystore)
         self.keystores[name] = keystore
         self.keystore = self.keystores['x1']
         self.save_keystore()
