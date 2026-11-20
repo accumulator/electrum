@@ -234,6 +234,9 @@ class HardwareClientBase(ABC):
     _route = (None, None)  # type: Tuple[Optional[weakref.ref[Hardware_KeyStore]], Optional[HandlerDelegate]]
     _route_lock = threading.Lock()
     _fixed_handler = None  # type: Optional[HardwareHandlerBase]
+    # Whether the client can serve several roots (passphrases) at the same time, e.g. with a session per
+    # passphrase. If not, pairing it with one root unpairs the keystores of the others.
+    concurrent_roots = False
 
     def __init__(self, *, plugin: 'HW_PluginBase', device_descriptor: 'Device'):
         assert_runs_in_hwd_thread()
@@ -343,13 +346,6 @@ class HardwareClientBase(ABC):
             soft_device_id=self.get_soft_device_id() if self.is_paired() else HardwareClientBase.get_soft_device_id(self),
             model_name=self.device_model_name()
         )
-
-    def get_pairing_code(self):
-        assert self.is_paired()
-        sdid = self.get_soft_device_id()
-        if not sdid:
-            return None
-        return f"{self.plugin.name}/{sdid}"
 
     @abstractmethod
     def has_usable_connection_with_device(self) -> bool:

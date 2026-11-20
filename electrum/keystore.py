@@ -1042,10 +1042,12 @@ class Hardware_KeyStore(Xpub, KeyStore):
             self.is_requesting_to_be_rewritten_to_wallet_file = True
 
     def pairing_code(self) -> Optional[str]:
-        """Used by the DeviceMgr to keep track of paired hw devices."""
+        """Used by the DeviceMgr to keep track of paired hw devices. Names the device and the root it is
+        paired with: the root changes with the passphrase, while e.g. a Trezor's soft device id doesn't."""
         if not self.soft_device_id:
             return None
-        return f"{self.plugin.name}/{self.soft_device_id}"
+        root = self.get_root_fingerprint()
+        return f"{self.plugin.name}/{self.soft_device_id}/{root.lower() if root else ''}"
 
 
 KeyStoreWithMPK = Union[KeyStore, MasterPublicKeyMixin]  # intersection really...

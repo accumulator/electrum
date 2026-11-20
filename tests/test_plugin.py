@@ -12,7 +12,7 @@ from electrum import util
 from electrum import plugin as plugin_module
 from electrum.crypto import sha256
 from electrum.plugin import (Plugins, IncorrectPluginHash, PluginMetadata, DeviceMgr, _hwd_comms_executor,
-                             runs_in_hwd_thread, run_in_hwd_thread)
+                             runs_in_hwd_thread, run_in_hwd_thread, DeviceUnpairableError)
 from electrum.hw_wallet import HW_PluginBase, HardwareClientBase, constant_handler_delegate
 from electrum.keystore import Hardware_KeyStore
 from electrum.zip_importer import MemoryZipImporter
@@ -162,6 +162,11 @@ class PluginLoaderTestCase(ElectrumTestCase):
         self.assertTrue(plugins.is_authorized(PLUGIN_NAME))
 
 
+# two wallets on one device, with different passphrases (the master xpubs of BIP-32 test vectors 1 and 2)
+ROOT_A, XPUB_A = 'aaaaaaaa', 'xpub661MyMwAqRbcFtXgS5sYJABqqG9YLmC4Q1Rdap9gSE8NqtwybGhePY2gZ29ESFjqJoCu1Rupje8YtGqsefD265TMg7usUDFdp6W1EGMcet8'
+ROOT_B, XPUB_B = 'bbbbbbbb', 'xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB'
+
+
 class FakeHandler:
     def __init__(self):
         self.statuses = []
@@ -172,6 +177,7 @@ class FakeHandler:
 
 class FakePlugin:
     name = 'fake'
+    device = 'Fake'
     close_keystore = HW_PluginBase.close_keystore
 
     def __init__(self, devmgr: DeviceMgr):
@@ -195,6 +201,7 @@ class FakeClient(HardwareClientBase):
         self.aborted = False
         self.closed_on = None  # name of the thread that closed the client
         self.usable = True
+        self.xpub = None  # what get_xpub returns, e.g. depending on the passphrase of the session
 
     def is_pairable(self):
         return True
@@ -203,7 +210,7 @@ class FakeClient(HardwareClientBase):
         return True
 
     def get_xpub(self, bip32_path, xtype):
-        raise NotImplementedError()
+        return self.xpub
 
     def has_usable_connection_with_device(self):
         return self.usable
@@ -220,8 +227,11 @@ class FakeKeystore(Hardware_KeyStore):
     hw_type = 'fake'
     device = 'Fake'
 
-    def __init__(self, plugin: FakePlugin, soft_device_id: str, handler: FakeHandler = None):
-        Hardware_KeyStore.__init__(self, {'soft_device_id': soft_device_id})
+    def __init__(self, plugin: FakePlugin, soft_device_id: str, handler: FakeHandler = None, *,
+                 root_fingerprint: str = None, xpub: str = None):
+        Hardware_KeyStore.__init__(self, {
+            'soft_device_id': soft_device_id, 'root_fingerprint': root_fingerprint, 'xpub': xpub, 'derivation': "m/0h",
+        })
         self.plugin = plugin
         if handler is not None:
             self.set_handler_delegate(constant_handler_delegate(handler))
@@ -262,7 +272,7 @@ class DeviceMgrTestCase(ElectrumTestCase):
         self.client = self._add_client('dev1')
         self.handler = FakeHandler()
         # a wallet's keystore, paired with dev1
-        self.keystore = FakeKeystore(self.plugin, 'abc', self.handler)
+        self.keystore = FakeKeystore(self.plugin, 'abc', self.handler, root_fingerprint=ROOT_A, xpub=XPUB_A)
         self.devmgr.pairing_code_to_id[self.keystore.pairing_code()] = 'dev1'
         self.devmgr._keystore_to_id[self.keystore] = 'dev1'
 
@@ -292,7 +302,7 @@ class DeviceMgrTestCase(ElectrumTestCase):
         self.assertLess(time.monotonic() - t0, 1)
         # invalidated right away
         self.assertIsNone(self.devmgr._client_by_id('dev1'))
-        self.assertIsNone(self.devmgr.id_by_pairing_code('fake/abc'))
+        self.assertIsNone(self.devmgr.id_by_pairing_code(self.keystore.pairing_code()))
         self.assertIsNone(self.devmgr.get_bound_client(self.keystore))
         self.assertTrue(self.client.aborted)
         self.assertEqual([False], self.handler.statuses)
@@ -339,7 +349,7 @@ class DeviceMgrTestCase(ElectrumTestCase):
         closed_on = self._scan()
         self.assertTrue(closed_on.startswith('hwd_comms_thread'))
         self.assertIsNone(self.devmgr._client_by_id('dev1'))
-        self.assertIsNone(self.devmgr.id_by_pairing_code('fake/abc'))
+        self.assertIsNone(self.devmgr.id_by_pairing_code(self.keystore.pairing_code()))
         self.assertEqual([False], self.handler.statuses)
         self.assertFalse(self.client.aborted)  # not on the hwd thread
 
@@ -359,14 +369,14 @@ class DeviceMgrTestCase(ElectrumTestCase):
         self.devmgr.unpair_id('dev1')
         self.assertIsNotNone(self.client.closed_on)
         self.assertIsNone(self.devmgr._client_by_id('dev1'))
-        self.assertIsNone(self.devmgr.id_by_pairing_code('fake/abc'))
+        self.assertIsNone(self.devmgr.id_by_pairing_code(self.keystore.pairing_code()))
         self.assertEqual([False], self.handler.statuses)
 
     # --- routing ---
 
     def test_client_serves_the_last_requesting_keystore(self):
         handler2 = FakeHandler()
-        keystore2 = FakeKeystore(self.plugin, 'abc', handler2)  # another wallet using the same device
+        keystore2 = FakeKeystore(self.plugin, 'abc', handler2, root_fingerprint=ROOT_A)  # another wallet using the same device
         self.assertIs(self.client, self._client_for(self.keystore))
         self.assertIs(self.handler, self.client.get_handler())
         self.assertIs(self.client, self._client_for(keystore2))
@@ -460,7 +470,7 @@ class DeviceMgrTestCase(ElectrumTestCase):
         handler2 = FakeHandler()
         keystore2 = FakeKeystore(self.plugin, 'abc', handler2)
         self.devmgr._keystore_to_id[keystore2] = 'dev1'
-        self.devmgr.unpair_pairing_code('fake/abc')
+        self.devmgr.unpair_pairing_code(self.keystore.pairing_code())
         self.assertEqual([False], self.handler.statuses)
         self.assertEqual([False], handler2.statuses)
 
@@ -483,32 +493,101 @@ class DeviceMgrTestCase(ElectrumTestCase):
             self._client_for(keystore2)
         self.assertIn('Handler not found', str(ctx.exception))
 
+    # --- passphrases: one device, several roots ---
+
+    def _force_pair(self, keystore: FakeKeystore, device_xpub: str):
+        """Pairs keystore with dev1, whose session has the passphrase that gives device_xpub."""
+        self.client.xpub = device_xpub
+        info = SimpleNamespace(device=SimpleNamespace(id_='dev1'))
+        return self.devmgr.force_pair_keystore(plugin=self.plugin, info=info, keystore=keystore)
+
+    def test_pairing_another_root_unpairs_the_old_root(self):
+        self._force_pair(self.keystore, XPUB_A)
+        old_root_handler, unknown_root_handler = FakeHandler(), FakeHandler()
+        old_root = FakeKeystore(self.plugin, 'abc', old_root_handler, root_fingerprint=ROOT_A)  # e.g. another account
+        unknown_root = FakeKeystore(self.plugin, 'abc', unknown_root_handler)  # e.g. an old wallet file
+        self.devmgr._keystore_to_id[old_root] = 'dev1'
+        self.devmgr._keystore_to_id[unknown_root] = 'dev1'
+        # e.g. after a reconnect, another wallet pairs the device with its own passphrase
+        new_root = FakeKeystore(self.plugin, 'abc', FakeHandler(), root_fingerprint=ROOT_B, xpub=XPUB_B)
+        self.assertIs(self.client, self._force_pair(new_root, XPUB_B))
+        self.assertEqual('dev1', self.devmgr.id_by_pairing_code(new_root.pairing_code()))
+        self.assertIsNone(self.devmgr.id_by_pairing_code(self.keystore.pairing_code()))
+        self.assertEqual([False], self.handler.statuses)
+        self.assertEqual([False], old_root_handler.statuses)
+        self.assertIsNone(self.devmgr.get_bound_client(self.keystore))
+        self.assertIsNone(self.devmgr.get_bound_client(old_root))
+        # a keystore whose root is unknown has a code of its own: it pairs anew, which checks its xpub
+        self.assertEqual([False], unknown_root_handler.statuses)
+        self.assertIsNone(self.devmgr.get_bound_client(unknown_root))
+
+    def test_client_with_concurrent_roots_keeps_the_other_roots(self):
+        self.client.concurrent_roots = True  # e.g. a session per passphrase
+        self._force_pair(self.keystore, XPUB_A)
+        new_root = FakeKeystore(self.plugin, 'abc', FakeHandler(), root_fingerprint=ROOT_B, xpub=XPUB_B)
+        self._force_pair(new_root, XPUB_B)
+        self.assertEqual('dev1', self.devmgr.id_by_pairing_code(self.keystore.pairing_code()))
+        self.assertEqual('dev1', self.devmgr.id_by_pairing_code(new_root.pairing_code()))
+        self.assertIs(self.client, self.devmgr.get_bound_client(self.keystore))
+        self.assertEqual([], self.handler.statuses)
+
+    def test_lookup_of_another_root_does_not_reuse_the_client(self):
+        self._force_pair(self.keystore, XPUB_A)
+        other_root = FakeKeystore(self.plugin, 'abc', FakeHandler(), root_fingerprint=ROOT_B, xpub=XPUB_B)
+        # same pairing code, but it must pair anew, which checks the xpub
+        self.assertIsNone(self._client_for(other_root))
+        self.assertIs(self.client, self._client_for(self.keystore))
+
+    def test_pairing_fails_while_the_device_has_another_passphrase(self):
+        self._force_pair(self.keystore, XPUB_A)
+        other_root = FakeKeystore(self.plugin, 'abc', FakeHandler(), root_fingerprint=ROOT_B, xpub=XPUB_B)
+        with self.assertRaises(DeviceUnpairableError):
+            self._force_pair(other_root, XPUB_A)
+        self.assertIs(self.client, self.devmgr.get_bound_client(self.keystore))
+        self.assertEqual([], self.handler.statuses)
+
+    def test_removal_drops_every_code_of_the_device(self):
+        # e.g. a Ledger, whose code has the root anyway, paired with two passphrases in turn
+        other_root = FakeKeystore(self.plugin, 'abc', FakeHandler(), root_fingerprint=ROOT_B)
+        self.devmgr.pairing_code_to_id[other_root.pairing_code()] = 'dev1'
+        self.devmgr.on_device_removed('dev1')
+        self.assertEqual({}, self.devmgr.pairing_code_to_id)
+
+    def test_no_leftover_code_reuses_a_reconnected_device(self):
+        other_root = FakeKeystore(self.plugin, 'abc', FakeHandler(), root_fingerprint=ROOT_B, xpub=XPUB_B)
+        self.devmgr.pairing_code_to_id[other_root.pairing_code()] = 'dev1'
+        self.devmgr.unpair_id('dev1')
+        # reconnected on the same port: same id_, a new client that nobody paired yet
+        self._add_client('dev1')
+        self.assertIsNone(self._client_for(self.keystore))
+        self.assertIsNone(self._client_for(other_root))
+
     # --- closing ---
 
     def test_release_keeps_a_device_that_is_still_used(self):
         handler2 = FakeHandler()
-        keystore2 = FakeKeystore(self.plugin, 'abc', handler2)  # another wallet using dev1
+        keystore2 = FakeKeystore(self.plugin, 'abc', handler2, root_fingerprint=ROOT_A)  # another wallet using dev1
         self.devmgr._keystore_to_id[keystore2] = 'dev1'
         self.devmgr.release_keystore(self.keystore)
         self.assertIsNone(self.client.closed_on)
-        self.assertEqual('dev1', self.devmgr.id_by_pairing_code('fake/abc'))
+        self.assertEqual('dev1', self.devmgr.id_by_pairing_code(self.keystore.pairing_code()))
         self.assertIsNone(self.devmgr.get_bound_client(self.keystore))
         self.assertIs(self.client, self.devmgr.get_bound_client(keystore2))
         self.assertEqual([], handler2.statuses)
         # the last one unpairs and closes it
         self.devmgr.release_keystore(keystore2)
         self.assertIsNotNone(self.client.closed_on)
-        self.assertIsNone(self.devmgr.id_by_pairing_code('fake/abc'))
+        self.assertIsNone(self.devmgr.id_by_pairing_code(self.keystore.pairing_code()))
         self.assertIsNone(self.devmgr._client_by_id('dev1'))
 
     def test_release_of_an_unbound_keystore_keeps_a_device_that_is_still_used(self):
-        keystore2 = FakeKeystore(self.plugin, 'abc', FakeHandler())  # e.g. its wallet did not pair yet
+        keystore2 = FakeKeystore(self.plugin, 'abc', FakeHandler(), root_fingerprint=ROOT_A)  # e.g. its wallet did not pair yet
         self.devmgr.release_keystore(keystore2)
         self.assertIsNone(self.client.closed_on)
-        self.assertEqual('dev1', self.devmgr.id_by_pairing_code('fake/abc'))
+        self.assertEqual('dev1', self.devmgr.id_by_pairing_code(self.keystore.pairing_code()))
 
     def test_close_keystore(self):
-        keystore2 = FakeKeystore(self.plugin, 'abc', FakeHandler())  # another wallet using dev1
+        keystore2 = FakeKeystore(self.plugin, 'abc', FakeHandler(), root_fingerprint=ROOT_A)  # another wallet using dev1
         self.devmgr._keystore_to_id[keystore2] = 'dev1'
         self.keystore.thread = thread = FakeThread()
         self.client.set_keystore(self.keystore)
