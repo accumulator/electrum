@@ -314,13 +314,13 @@ class QmlPluginBase(Logger):
             client = None
             device_uid = None
             # keystore -> client -> handler
-            # keystore has soft_device_id, match against
+            # keystore has soft_device_id, match against. Not the pairing code: e.g. a new wallet's device
+            # was used by the wizard, but not paired yet.
             devmgr = keystore.plugin.device_manager()
             for client_, id_ in devmgr.clients.items():
                 if not client_.is_paired():
                     continue
-                pcc = client_.get_pairing_code()
-                if pcc == keystore.pairing_code():
+                if client_.plugin is keystore.plugin and client_.get_soft_device_id() == keystore.soft_device_id:
                     client = client_
                     device_uid = id_
 

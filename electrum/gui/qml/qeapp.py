@@ -376,15 +376,8 @@ class QEAppController(BaseCrashReporter, QObject):
     @pyqtSlot(str, result=QObject)
     def deviceHandlerByPairingCode(self, pairing_code):
         # returns handler-QObject associated to device
-        client = None
-        device_uid = None
-        for client_, id_ in self._plugins.device_manager.clients.items():
-            if client_.get_pairing_code() == pairing_code:
-                client = client_
-                device_uid = id_
-                break
-
-        # client = self._plugins.device_manager.client_by_pairing_code()client_by_id(device_uid, scan_now=False)
+        device_uid = self._plugins.device_manager.id_by_pairing_code(pairing_code)
+        client = self._plugins.device_manager.client_by_id(device_uid, scan_now=False) if device_uid else None
         if not client:
             return
 
