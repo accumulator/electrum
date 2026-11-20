@@ -562,6 +562,34 @@ class DeviceMgrTestCase(ElectrumTestCase):
         self.assertIsNone(self._client_for(self.keystore))
         self.assertIsNone(self._client_for(other_root))
 
+    def test_repairing_a_device_pairs_the_matching_keystores_along(self):
+        # three open wallets on the device: one more with the passphrase of self.keystore, one with another
+        same_root_handler, other_root_handler = FakeHandler(), FakeHandler()
+        same_root = FakeKeystore(self.plugin, 'abc', same_root_handler, root_fingerprint=ROOT_A)
+        other_root = FakeKeystore(self.plugin, 'abc', other_root_handler, root_fingerprint=ROOT_B)
+        for keystore in (self.keystore, same_root, other_root):
+            self._client_for(keystore)
+        # unplugged and plugged in again
+        self.devmgr.on_device_removed('dev1')
+        self.client = self._add_client('dev1')
+        # one wallet pairs it again: the other wallet with that passphrase is paired along
+        self._force_pair(self.keystore, XPUB_A)
+        self.assertIs(self.client, self.devmgr.get_bound_client(same_root))
+        self.assertEqual([True, False, True], same_root_handler.statuses)
+        self.assertIsNone(self.devmgr.get_bound_client(other_root))
+        self.assertEqual([False], other_root_handler.statuses)
+
+    def test_released_keystore_is_not_paired_along(self):
+        closed_handler = FakeHandler()
+        closed = FakeKeystore(self.plugin, 'abc', closed_handler, root_fingerprint=ROOT_A)
+        self._client_for(closed)
+        self.devmgr.on_device_removed('dev1')
+        self.devmgr.release_keystore(closed)  # its wallet was closed
+        self.client = self._add_client('dev1')
+        self._force_pair(self.keystore, XPUB_A)
+        self.assertIsNone(self.devmgr.get_bound_client(closed))
+        self.assertEqual([True, False], closed_handler.statuses)
+
     # --- closing ---
 
     def test_release_keeps_a_device_that_is_still_used(self):
