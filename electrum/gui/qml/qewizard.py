@@ -116,23 +116,23 @@ class QENewWalletWizard(NewWalletWizard, QEAbstractWizard):
         plugin = self.plugins.get_plugin(device_info.plugin_name)  # type: QmlPluginBase
         handler = plugin.create_handler(device_uid)  # type: QmlHandlerBase
         # TODO: create_client -> client_by_id?
-        client = self.plugins.device_manager.create_client(device_info.device, handler, plugin)
-        client.handler = handler
+        client = self.plugins.device_manager.create_client(device_info.device, plugin)
+        client.set_handler_delegate(plugin.handler_delegate)
         # self.title = _('Unlocking {} ({})').format(_info.model_name, _info.label)
 
         def unlock_task(client):
             try:
                 self.password = client.get_password_for_storage_encryption()
                 # we have the password, let GUI know
-                client.handler.show_message('Unlocked')
-                client.handler.password_available.emit()
+                handler.show_message('Unlocked')
+                handler.password_available.emit()
             except UserCancelled as e:
-                client.handler.show_error(repr(e))
+                handler.show_error(repr(e))
             except Exception as e:
-                client.handler.show_error(repr(e))
+                handler.show_error(repr(e))
                 self._logger.exception(repr(e))
             finally:
-                client.handler.finished()
+                handler.finished()
 
         t = threading.Thread(target=unlock_task, args=(client,), daemon=True)
         t.start()
@@ -149,18 +149,18 @@ class QENewWalletWizard(NewWalletWizard, QEAbstractWizard):
 
         cosigner_data = self.current_cosigner(self._current.wizard_data)
         plugin = self.plugins.get_plugin(device_info.plugin_name)  # type: QmlPluginBase
-        # handler = plugin.create_handler(device_uid)
+        handler = plugin.create_handler(device_uid)  # type: QmlHandlerBase
         # TODO: create_client -> client_by_id?
-        client = self.plugins.device_manager.client_by_id(device_uid)  #create_client(device_info.device, handler, plugin)
-        # client.handler = handler
+        client = self.plugins.device_manager.client_by_id(device_uid)
+        client.set_handler_delegate(plugin.handler_delegate)
         # self.title = _('Unlocking {} ({})').format(_info.model_name, _info.label)
 
         xtype = cosigner_data['script_type']
         derivation = cosigner_data['derivation_path']
-        client.handler.xpub_data = {}  # the page must not apply data from a previous retrieval
+        handler.xpub_data = {}  # the page must not apply data from a previous retrieval
 
         def get_xpub_task(_client, _derivation, _xtype):
-            _client.handler.show_message('...')
+            handler.show_message('...')
             try:
                 # self.xpub = self.get_xpub_from_client(_client, _derivation, _xtype)
                 self.xpub = _client.get_xpub(_derivation, _xtype)
@@ -173,19 +173,19 @@ class QENewWalletWizard(NewWalletWizard, QEAbstractWizard):
             except Exception as e:
                 self.error = repr(e)  # TODO: handle user interaction exceptions (e.g. invalid pin) more gracefully
                 self._logger.exception(repr(e))
-                _client.handler.show_error(self.error)
+                handler.show_error(self.error)
                 self.xpub = None
             if self.xpub:
                 self._logger.debug(f'Done retrieve xpub: {self.xpub[:10]}...{self.xpub[-5:]}')
-                _client.handler.show_message('xpub retrieved')
-                _client.handler.xpub_data = {
+                handler.show_message('xpub retrieved')
+                handler.xpub_data = {
                     'hw_type': _client.plugin.name,
                     'master_key': self.xpub,
                     'root_fingerprint': self.root_fingerprint,
                     'label': self.label,
                     'soft_device_id': self.soft_device_id,
                 }
-                _client.handler.xpub_available.emit()
+                handler.xpub_available.emit()
 
         t = threading.Thread(target=get_xpub_task, args=(client, derivation, xtype), daemon=True)
         t.start()

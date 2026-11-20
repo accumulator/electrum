@@ -32,9 +32,7 @@ class Plugin(BitBox02Plugin, QmlPluginBase):
     @runs_in_hwd_thread
     def create_client(self, device_descriptor: 'Device', handler) -> BitBox02Client:
         self.logger.info(f'thread: {threading.current_thread().name}')
-        # if handler is None:
-        #     handler = self.create_handler(device_descriptor.id_)
-        return BitBox02Client(handler, device_descriptor, self.config, plugin=self)
+        return BitBox02Client(device_descriptor, self.config, plugin=self)
 
     # insert bitbox02 pages in new wallet wizard
     def extend_wizard(self, wizard: 'QENewWalletWizard'):

@@ -39,7 +39,7 @@ from electrum import platform
 
 from electrum.gui.common_qt.util import TaskThread
 
-from .plugin import OutdatedHwFirmwareException, HW_PluginBase, HardwareHandlerBase
+from .plugin import OutdatedHwFirmwareException, HW_PluginBase, HardwareHandlerBase, HardwareClientBase
 
 if TYPE_CHECKING:
     from electrum.wallet import Abstract_Wallet
@@ -312,22 +312,23 @@ class QmlPluginBase(Logger):
                 raise MissingLibrariesException(message)
 
             client = None
+            device_uid = None
             # keystore -> client -> handler
             # keystore has soft_device_id, match against
             devmgr = keystore.plugin.device_manager()
-            # client = devmgr.client_by_pairing_code(pairing_code=keystore.pairing_code(), plugin=keystore.plugin, handler=None, devices=None)
             for client_, id_ in devmgr.clients.items():
                 if not client_.is_paired():
                     continue
                 pcc = client_.get_pairing_code()
                 if pcc == keystore.pairing_code():
                     client = client_
+                    device_uid = id_
 
             if not client:
                 self.logger.warning('no suitable client for keystore found')
                 return
 
-            keystore.handler = client.handler
+            keystore.set_handler_delegate(partial(self.handler_delegate, device_uid=device_uid))
             # keystore.thread = TaskThread(window, on_error=partial(self.on_task_thread_error, window, keystore))
             keystore.thread = TaskThread(parent, on_error=self.on_error)
 
@@ -374,7 +375,7 @@ class QmlPluginBase(Logger):
         device_id = self.device_manager().id_by_pairing_code(keystore.pairing_code())
         if not device_id:
             try:
-                info = self.device_manager().select_device(self, keystore.handler, keystore)
+                info = self.device_manager().select_device(self, keystore)
             except UserCancelled:
                 return
             device_id = info.device.id_
@@ -405,6 +406,15 @@ class QmlPluginBase(Logger):
 
     # def create_handler(self, device_uid: str, parent=None) -> 'QmlHandlerBase':
     #     raise NotImplementedError()
+
+    def handler_delegate(
+        self, *, keystore: Optional['Hardware_KeyStore'], client: Optional['HardwareClientBase'],
+        device_uid: str = None,
+    ) -> Optional[QmlHandlerBase]:
+        # handlers are per device. This only looks them up: create_handler creates them, on the GUI thread
+        if client is not None:
+            device_uid = client.device_descriptor.id_
+        return self.handler_map.get(device_uid)
 
     def create_handler(self, device_uid: str, parent: QObject = None) -> QmlHandlerBase:
         if not self.handler_class:
