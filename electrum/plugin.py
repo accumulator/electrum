@@ -1290,12 +1290,11 @@ class DeviceMgr(ThreadJob):
         with self.lock:
             return self.pairing_code_to_id.get(pairing_code)
 
-    def pairing_code_by_id(self, id_):
+    def _drop_pairing_codes(self, id_: str, *, keep: str = None) -> None:
+        """Drops the pairing codes of the device, except keep. A device has one per root it is paired with."""
         with self.lock:
-            for pairing_code, id2 in self.pairing_code_to_id.items():
-                if id2 == id_:
-                    return pairing_code
-            return None
+            for pairing_code in [pc for pc, id2 in self.pairing_code_to_id.items() if id2 == id_ and pc != keep]:
+                del self.pairing_code_to_id[pairing_code]
 
     def unpair_pairing_code(self, pairing_code):
         with self.lock:
@@ -1311,16 +1310,12 @@ class DeviceMgr(ThreadJob):
             id_ = self._keystore_to_id.pop(keystore, None)
             if id_ is None:
                 id_ = self.pairing_code_to_id.get(keystore.pairing_code())
-            still_used = id_ is not None and id_ in self._keystore_to_id.values()
-        if not still_used:
-            self.unpair_pairing_code(keystore.pairing_code())
+            still_used = id_ in self._keystore_to_id.values()
+        if id_ is not None and not still_used:
+            self.unpair_id(id_)
 
     def unpair_id(self, id_):
-        pairing_code = self.pairing_code_by_id(id_)
-        if pairing_code:
-            self.unpair_pairing_code(pairing_code)
-        else:
-            self._close_client(id_)
+        self._close_client(id_)
 
     def _close_client(self, id_):
         if client := self._forget_client(id_):
@@ -1328,9 +1323,11 @@ class DeviceMgr(ThreadJob):
         self._unbind_device(id_)
 
     def _forget_client(self, id_) -> Optional['HardwareClientBase']:
+        """Forgets the client of the device, and unpairs the device."""
         with self.lock:
             client = self._client_by_id(id_)
             self._clients.pop(client, None)
+            self._drop_pairing_codes(id_)
             if fut := self._ongoing_timeout_checks.pop(id_, None):
                 fut.cancel()
         return client
@@ -1349,10 +1346,7 @@ class DeviceMgr(ThreadJob):
         not wait for the hwd thread, which may still be busy with an operation on the device."""
         self.logger.info(f"device removed: {id_}")
         # unpair and forget it right away, so that nothing picks it up anymore
-        with self.lock:
-            if pairing_code := self.pairing_code_by_id(id_):
-                del self.pairing_code_to_id[pairing_code]
-            client = self._forget_client(id_)
+        client = self._forget_client(id_)
         self._unbind_device(id_)
         if not client:
             return
@@ -1401,6 +1395,17 @@ class DeviceMgr(ThreadJob):
             for keystore in keystores:
                 del self._keystore_to_id[keystore]
         self._notify_status(keystores, False)
+
+    def _unpair_other_roots(self, id_: str, pairing_code: str) -> None:
+        """The device was paired with the root (passphrase) of pairing_code, and its client can't serve
+        other roots at the same time: unpair those, and unbind their keystores."""
+        with self.lock:
+            self._drop_pairing_codes(id_, keep=pairing_code)
+            others = [ks for ks, id2 in self._keystore_to_id.items()
+                      if id2 == id_ and ks.pairing_code() != pairing_code]
+            for ks in others:
+                del self._keystore_to_id[ks]
+        self._notify_status(others, False)
 
     @staticmethod
     def _notify_status(keystores: Sequence['Hardware_KeyStore'], paired: bool) -> None:
@@ -1495,9 +1500,12 @@ class DeviceMgr(ThreadJob):
                 # Bad / cancelled PIN / passphrase
                 client_xpub = None
             if client_xpub == xpub:
-                keystore.opportunistically_fill_in_missing_info_from_device(client)
+                keystore.opportunistically_fill_in_missing_info_from_device(client)  # fills in its root, if missing
+                pairing_code = keystore.pairing_code()
                 with self.lock:
-                    self.pairing_code_to_id[keystore.pairing_code()] = info.device.id_
+                    self.pairing_code_to_id[pairing_code] = info.device.id_
+                if not client.concurrent_roots:
+                    self._unpair_other_roots(info.device.id_, pairing_code)
                 return client
 
         # The user input has wrong PIN or passphrase, or cancelled input,
