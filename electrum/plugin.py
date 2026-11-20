@@ -38,7 +38,7 @@ from enum import Enum
 from urllib.parse import urlparse
 
 from typing import (NamedTuple, Any, Union, TYPE_CHECKING, Optional, Tuple,
-                    Dict, Iterable, List, Sequence, Callable, TypeVar, Mapping, MutableMapping)
+                    Dict, Iterable, List, Sequence, Callable, TypeVar, Mapping, MutableMapping, MutableSet)
 import concurrent
 from concurrent.futures import Future
 from functools import wraps, partial
@@ -1205,8 +1205,9 @@ class DeviceMgr(ThreadJob):
     A keystore is bound to the device it last paired with.  When the
     pairing changes, e.g. the device is unplugged, the keystores bound
     to the device are informed through their handler's update_status().
-    That can happen in any thread context, and we do it without
-    holding the lock.
+    When a device is paired, the other keystores with the same pairing
+    code, e.g. of other open wallets, are paired along.  That can happen
+    in any thread context, and we do it without holding the lock.
 
     Confusingly, the HID ID (serial number) reported by the HID system
     doesn't match the device ID reported by the device itself.  We use
@@ -1223,6 +1224,9 @@ class DeviceMgr(ThreadJob):
         self._clients = {}  # type: Dict[HardwareClientBase, str]
         # A keystore->id_ map, of the device the keystore last paired with. Needs self.lock.
         self._keystore_to_id = weakref.WeakKeyDictionary()  # type: MutableMapping[Hardware_KeyStore, str]
+        # The keystores that looked up a device, bound or not, until released: e.g. those of all open
+        # wallets. They are paired along when a device is paired with their pairing code. Needs self.lock.
+        self._keystores = weakref.WeakSet()  # type: MutableSet[Hardware_KeyStore]
         # What we recognise.  (vendor_id, product_id) -> Plugin
         self._recognised_hardware = {}  # type: Dict[Tuple[int, int], HW_PluginBase]
         self._recognised_vendor = {}  # type: Dict[int, HW_PluginBase]  # vendor_id -> Plugin
@@ -1307,6 +1311,7 @@ class DeviceMgr(ThreadJob):
         """The keystore no longer uses its device, e.g. because its wallet was closed.
         Unpairs the device, unless other keystores still use it."""
         with self.lock:
+            self._keystores.discard(keystore)
             id_ = self._keystore_to_id.pop(keystore, None)
             if id_ is None:
                 id_ = self.pairing_code_to_id.get(keystore.pairing_code())
@@ -1407,6 +1412,18 @@ class DeviceMgr(ThreadJob):
                 del self._keystore_to_id[ks]
         self._notify_status(others, False)
 
+    def _pair_matching_keystores(self, id_: str, keystore: 'Hardware_KeyStore') -> None:
+        """The device was paired with keystore: pair the other keystores with the same pairing code along,
+        e.g. of other open wallets with the same passphrase."""
+        pairing_code = keystore.pairing_code()
+        with self.lock:
+            others = [ks for ks in self._keystores
+                      if ks is not keystore and self._keystore_to_id.get(ks) != id_
+                      and ks.pairing_code() == pairing_code]
+            for ks in others:
+                self._keystore_to_id[ks] = id_
+        self._notify_status(others, True)
+
     @staticmethod
     def _notify_status(keystores: Sequence['Hardware_KeyStore'], paired: bool) -> None:
         # keystores can share a handler, e.g. on QML, where there is one per device
@@ -1434,6 +1451,8 @@ class DeviceMgr(ThreadJob):
         self.logger.info("getting client for keystore")
         if keystore.get_handler() is None:
             raise Exception(_("Handler not found for {}").format(plugin.name) + '\n' + _("A library is probably missing."))
+        with self.lock:
+            self._keystores.add(keystore)
         pcode = keystore.pairing_code()
         client = None
         try:
@@ -1506,6 +1525,7 @@ class DeviceMgr(ThreadJob):
                     self.pairing_code_to_id[pairing_code] = info.device.id_
                 if not client.concurrent_roots:
                     self._unpair_other_roots(info.device.id_, pairing_code)
+                self._pair_matching_keystores(info.device.id_, keystore)
                 return client
 
         # The user input has wrong PIN or passphrase, or cancelled input,
