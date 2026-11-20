@@ -24,8 +24,11 @@
 # SOFTWARE.
 import os
 import sys
+import threading
+import weakref
 from abc import abstractmethod, ABC
-from typing import TYPE_CHECKING, Sequence, Optional, Type, Iterable, Any, Callable
+from contextlib import contextmanager
+from typing import TYPE_CHECKING, Sequence, Optional, Type, Iterable, Any, Callable, Tuple
 
 from electrum import get_logger
 from electrum.plugin import (
@@ -41,9 +44,21 @@ from electrum.keystore import Xpub, Hardware_KeyStore
 from electrum.plugin import DeviceInfo
 
 if TYPE_CHECKING:
-    import threading
     from electrum.wallet import Abstract_Wallet
     from electrum.wizard import AbstractWizard
+
+
+# Picks the handler that gets the user interaction of a keystore or client. Installed by the GUI, and
+# called as delegate(keystore=..., client=...) with what is known (either can be None).
+# It is called on any thread, mostly the hwd thread: it must be cheap, only return a reference
+# (no GUI calls), and must not call get_handler().
+HandlerDelegate = Callable[..., Optional['HardwareHandlerBase']]
+
+
+def constant_handler_delegate(handler: Optional['HardwareHandlerBase']) -> HandlerDelegate:
+    def delegate(*, keystore, client):
+        return handler
+    return delegate
 
 
 class HW_PluginBase(BasePlugin, ABC):
@@ -95,18 +110,23 @@ class HW_PluginBase(BasePlugin, ABC):
     def close_wallet(self, wallet: 'Abstract_Wallet'):
         for keystore in wallet.get_keystores():
             if isinstance(keystore, self.keystore_class):
-                # stop the thread first: if unpairing raises, the thread must not be leaked,
-                # as a still-running QThread would make Qt abort() the process at shutdown
-                if keystore.thread:
-                    keystore.thread.stop()
-                self.device_manager().unpair_pairing_code(keystore.pairing_code())
+                self.close_keystore(keystore)
+
+    def close_keystore(self, keystore: 'Hardware_KeyStore') -> None:
+        """Detaches keystore from the GUI and from its device, e.g. when its wallet is closed."""
+        # stop the thread first: if unpairing raises, the thread must not be leaked,
+        # as a still-running QThread would make Qt abort() the process at shutdown
+        if keystore.thread:
+            keystore.thread.stop()
+            keystore.thread = None
+        keystore.set_handler_delegate(None)
+        self.device_manager().release_keystore(keystore)
 
     def get_client(self, keystore: 'Hardware_KeyStore', force_pair: bool = True, *,
                    devices: Sequence['Device'] = None,
                    allow_user_interaction: bool = True) -> Optional['HardwareClientBase']:
         devmgr = self.device_manager()
-        handler = keystore.handler
-        client = devmgr.client_for_keystore(self, handler, keystore, force_pair,
+        client = devmgr.client_for_keystore(self, keystore, force_pair,
                                             devices=devices,
                                             allow_user_interaction=allow_user_interaction)
         return client
@@ -118,10 +138,10 @@ class HW_PluginBase(BasePlugin, ABC):
         if keystore is None:
             keystore = wallet.get_keystore()
         if not is_address(address):
-            keystore.handler.show_error(_('Invalid Bitcoin Address'))
+            keystore.get_handler().show_error(_('Invalid Bitcoin Address'))
             return False
         if not wallet.is_mine(address):
-            keystore.handler.show_error(_('Address not in wallet.'))
+            keystore.get_handler().show_error(_('Address not in wallet.'))
             return False
         if type(keystore) != self.keystore_class:
             return False
@@ -210,14 +230,57 @@ class HW_PluginBase(BasePlugin, ABC):
 
 
 class HardwareClientBase(ABC):
-    def __init__(self, *, plugin: 'HW_PluginBase', device_descriptor: 'Device',
-                 handler: Optional['HardwareHandlerBase'] = None):
-        # note: handler is optional; during device enumeration there is no handler, and several
-        # plugins set client.handler later (see DeviceMgr.client_for_keystore).
+    # Whom the client serves, which decides its handler: (keystore, None), or (None, delegate) for a user
+    # without a keystore, e.g. a wizard. A device is shared, so the last user wins.
+    # Class-level defaults: device libraries can call back before __init__ has run.
+    _route = (None, None)  # type: Tuple[Optional[weakref.ref[Hardware_KeyStore]], Optional[HandlerDelegate]]
+    _route_lock = threading.Lock()
+    _fixed_handler = None  # type: Optional[HardwareHandlerBase]
+
+    def __init__(self, *, plugin: 'HW_PluginBase', device_descriptor: 'Device'):
         assert_runs_in_hwd_thread()
         self.plugin = plugin
         self.device_descriptor = device_descriptor
-        self.handler = handler
+
+    def set_keystore(self, keystore: 'Hardware_KeyStore') -> None:
+        """The client now serves keystore: the keystore's delegate picks the handler."""
+        with self._route_lock:
+            self._route = (weakref.ref(keystore), None)
+
+    def set_handler_delegate(self, delegate: 'HandlerDelegate') -> None:
+        """The client now serves a user without a keystore, e.g. a wizard."""
+        with self._route_lock:
+            self._route = (None, delegate)
+
+    def release_handler_delegate(self, delegate: 'HandlerDelegate') -> None:
+        """Undoes set_handler_delegate, unless another user took over the client since."""
+        with self._route_lock:
+            if self._route[1] == delegate:
+                self._route = (None, None)
+
+    def get_handler(self) -> Optional['HardwareHandlerBase']:
+        if (handler := self._fixed_handler) is not None:
+            return handler
+        keystore_ref, delegate = self._route
+        if keystore_ref is not None:
+            keystore = keystore_ref()
+            return keystore.get_handler(client=self) if keystore is not None else None
+        if delegate is not None:
+            return delegate(keystore=None, client=self)
+        return None
+
+    @contextmanager
+    def fixed_handler(self):
+        """Keeps get_handler() on one handler during a flow: e.g. show_message() and the finished()
+        that closes its dialog must reach the same handler, even if another user takes over the client."""
+        if self._fixed_handler is not None:  # nested: the outer flow keeps its handler
+            yield
+            return
+        self._fixed_handler = self.get_handler()
+        try:
+            yield
+        finally:
+            self._fixed_handler = None
 
     def device_manager(self) -> 'DeviceMgr':
         return self.plugin.device_manager()
@@ -272,7 +335,7 @@ class HardwareClientBase(ABC):
         return True
 
     def get_device_info_for_enumeration(self) -> 'DeviceInfo':
-        # retrieve DeviceInfo without triggering pairing (same behaviour as handler==None)
+        # retrieve DeviceInfo without triggering pairing (same behaviour as without a handler)
         device = self.device_descriptor  # TODO: generalize? bitbox02 specific? Device must always be recorded
         return DeviceInfo(
             device=device,
@@ -355,11 +418,6 @@ class HardwareHandlerBase:
     """An interface between the GUI and the device handling logic for handling I/O."""
     win = None
     device: str
-
-    def get_wallet(self) -> Optional['Abstract_Wallet']:
-        if self.win is not None:
-            if hasattr(self.win, 'wallet'):
-                return self.win.wallet
 
     def get_gui_thread(self) -> Optional['threading.Thread']:
         if self.win is not None:

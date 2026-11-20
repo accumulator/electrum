@@ -8,10 +8,10 @@ if TYPE_CHECKING:
 
 
 class SafeTClient(SafeTClientBase, ProtocolMixin, BaseClient):
-    def __init__(self, device_descriptor: 'Device', transport, handler, plugin):
+    def __init__(self, device_descriptor: 'Device', transport, plugin):
         BaseClient.__init__(self, transport=transport)
         ProtocolMixin.__init__(self, transport=transport)
-        SafeTClientBase.__init__(self, device_descriptor, handler, plugin, proto)
+        SafeTClientBase.__init__(self, device_descriptor, plugin, proto)
 
 
 SafeTClientBase.wrap_methods(SafeTClient)

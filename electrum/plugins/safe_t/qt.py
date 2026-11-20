@@ -225,7 +225,7 @@ class SettingsDialog(WindowModalDialog):
 
         devmgr = plugin.device_manager()
         config = devmgr.config
-        handler = keystore.handler
+        handler = keystore.get_handler()
         thread = keystore.thread
         hs_cols, hs_rows = (128, 64)
 
@@ -236,6 +236,7 @@ class SettingsDialog(WindowModalDialog):
                 client = devmgr.client_by_id(device_id)
                 if not client:
                     raise RuntimeError("Device not connected")
+                client.set_keystore(keystore)
                 if method:
                     getattr(client, method)(*args, **kw_args)
                 if unpair_after:
@@ -610,7 +611,7 @@ class WCSafeTInit(WalletWizardComponent, Logger):
         method = current_cosigner['safe_t_init']
         device_id = current_cosigner['hardware_uid']
         client = self.plugins.device_manager.client_by_id(device_id, scan_now=False)
-        client.handler = self.plugin.create_handler(self.wizard)
+        handler = self.wizard.claim_hw_client(client)
 
         def initialize_device_task(settings, method, device_id, handler):
             try:
@@ -627,7 +628,7 @@ class WCSafeTInit(WalletWizardComponent, Logger):
 
         t = threading.Thread(
             target=initialize_device_task,
-            args=(settings, method, device_id, client.handler),
+            args=(settings, method, device_id, handler),
             daemon=True)
         t.start()
 

@@ -159,7 +159,7 @@ class KeepKeyPlugin(HW_PluginBase):
 
         self.logger.info(f"connected to device at {device_descriptor.path}")
 
-        client = self.client_class(device_descriptor, transport, handler, self)
+        client = self.client_class(device_descriptor, transport, self)
 
         # Try a ping for device sanity
         try:
@@ -277,7 +277,7 @@ class KeepKeyPlugin(HW_PluginBase):
             return
         client = self.get_client(keystore)
         if not client.atleast_version(1, 3):
-            keystore.handler.show_error(_("Your device firmware is too old"))
+            keystore.get_handler().show_error(_("Your device firmware is too old"))
             return
         deriv_suffix = wallet.get_address_index(address)
         derivation = keystore.get_derivation_prefix()

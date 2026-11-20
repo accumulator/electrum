@@ -25,6 +25,7 @@ from unicodedata import normalize
 import hashlib
 import re
 import copy
+import weakref
 from typing import Tuple, TYPE_CHECKING, Union, Sequence, Optional, Dict, List, NamedTuple, Any, Type
 from functools import wraps
 from abc import ABC, abstractmethod
@@ -54,8 +55,9 @@ from .i18n import _
 
 if TYPE_CHECKING:
     from .gui.common_qt.util import TaskThread
-    from .hw_wallet import HW_PluginBase, HardwareClientBase, HardwareHandlerBase
+    from .hw_wallet import HW_PluginBase, HardwareClientBase, HardwareHandlerBase, HandlerDelegate
     from .wallet_db import WalletDB
+    from .wallet import Abstract_Wallet
     from .plugin import Device
 
 
@@ -932,13 +934,13 @@ class Hardware_KeyStore(Xpub, KeyStore):
     def __init__(self, d):
         Xpub.__init__(self, derivation_prefix=d.get('derivation'), root_fingerprint=d.get('root_fingerprint'))
         KeyStore.__init__(self)
-        # Errors and other user interaction is done through the wallet's
-        # handler.  The handler is per-window and preserved across
-        # device reconnects
         self.xpub = d.get('xpub')
         self.label = d.get('label')  # type: Optional[str]
         self.soft_device_id = d.get('soft_device_id')  # type: Optional[str]
-        self.handler = None  # type: Optional[HardwareHandlerBase]
+        # Errors and other user interaction go through a handler, which a delegate installed by the
+        # GUI picks, e.g. the handler of the window showing the wallet.
+        self._handler_delegate = None  # type: Optional[HandlerDelegate]
+        self._wallet_ref = None  # type: Optional[weakref.ref[Abstract_Wallet]]
         run_hook('init_keystore', self)
 
     def watching_only_keystore(self):
@@ -960,6 +962,13 @@ class Hardware_KeyStore(Xpub, KeyStore):
     def get_type_text(self) -> str:
         return f'hw[{self.hw_type}]'
 
+    def set_wallet(self, wallet: Optional['Abstract_Wallet']) -> None:
+        # a weak reference: the wallet owns its keystores
+        self._wallet_ref = weakref.ref(wallet) if wallet is not None else None
+
+    def get_wallet(self) -> Optional['Abstract_Wallet']:
+        return self._wallet_ref() if self._wallet_ref is not None else None
+
     def dump(self):
         return {
             'type': self.type,
@@ -976,6 +985,17 @@ class Hardware_KeyStore(Xpub, KeyStore):
         pin and passphrase as appropriate when needed."""
         assert not self.has_seed()
         return False
+
+    def set_handler_delegate(self, delegate: Optional['HandlerDelegate']) -> None:
+        self._handler_delegate = delegate
+
+    def get_handler(self, *, client: 'HardwareClientBase' = None) -> Optional['HardwareHandlerBase']:
+        delegate = self._handler_delegate
+        if delegate is None:
+            return None
+        if client is None:
+            client = self.plugin.device_manager().get_bound_client(self)
+        return delegate(keystore=self, client=client)
 
     def get_client(
             self,

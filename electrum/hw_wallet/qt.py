@@ -45,7 +45,7 @@ from electrum.gui.qt.util import (
 from electrum.gui.qt.main_window import StatusBarButton
 
 
-from .plugin import OutdatedHwFirmwareException, HW_PluginBase, HardwareHandlerBase
+from .plugin import OutdatedHwFirmwareException, HW_PluginBase, HardwareHandlerBase, constant_handler_delegate
 
 if TYPE_CHECKING:
     from electrum.wallet import Abstract_Wallet
@@ -262,7 +262,7 @@ class QtPluginBase(object):
             sb.addPermanentWidget(button)
             handler = self.create_handler(window)
             handler.button = button
-            keystore.handler = handler
+            keystore.set_handler_delegate(constant_handler_delegate(handler))
             keystore.thread = TaskThread(window, on_error=partial(self.on_task_thread_error, window, keystore))
             self.add_show_address_on_hw_device_button_for_receive_addr(wallet, keystore, window)
         # Trigger pairings
@@ -305,7 +305,7 @@ class QtPluginBase(object):
         device_id = self.device_manager().id_by_pairing_code(keystore.pairing_code())
         if not device_id:
             try:
-                info = self.device_manager().select_device(self, keystore.handler, keystore)
+                info = self.device_manager().select_device(self, keystore)
             except UserCancelled:
                 return
             device_id = info.device.id_

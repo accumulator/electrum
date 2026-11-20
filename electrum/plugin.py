@@ -32,12 +32,13 @@ import importlib.util
 import time
 import threading
 import sys
+import weakref
 import zipfile as zipfile_lib
 from enum import Enum
 from urllib.parse import urlparse
 
 from typing import (NamedTuple, Any, Union, TYPE_CHECKING, Optional, Tuple,
-                    Dict, Iterable, List, Sequence, Callable, TypeVar, Mapping)
+                    Dict, Iterable, List, Sequence, Callable, TypeVar, Mapping, MutableMapping)
 import concurrent
 from concurrent.futures import Future
 from functools import wraps, partial
@@ -1201,10 +1202,11 @@ class DeviceMgr(ThreadJob):
     is plugged into a different port the wallet is automatically
     re-paired.
 
-    Wallets are informed on connect / disconnect events.  It must
-    implement connected(), disconnected() callbacks.  Being connected
-    implies a pairing.  Callbacks can happen in any thread context,
-    and we do them without holding the lock.
+    A keystore is bound to the device it last paired with.  When the
+    pairing changes, e.g. the device is unplugged, the keystores bound
+    to the device are informed through their handler's update_status().
+    That can happen in any thread context, and we do it without
+    holding the lock.
 
     Confusingly, the HID ID (serial number) reported by the HID system
     doesn't match the device ID reported by the device itself.  We use
@@ -1219,6 +1221,8 @@ class DeviceMgr(ThreadJob):
         self.pairing_code_to_id = {}  # type: Dict[str, str]
         # A client->id_ map. Needs self.lock.
         self._clients = {}  # type: Dict[HardwareClientBase, str]
+        # A keystore->id_ map, of the device the keystore last paired with. Needs self.lock.
+        self._keystore_to_id = weakref.WeakKeyDictionary()  # type: MutableMapping[Hardware_KeyStore, str]
         # What we recognise.  (vendor_id, product_id) -> Plugin
         self._recognised_hardware = {}  # type: Dict[Tuple[int, int], HW_PluginBase]
         self._recognised_vendor = {}  # type: Dict[int, HW_PluginBase]  # vendor_id -> Plugin
@@ -1266,14 +1270,17 @@ class DeviceMgr(ThreadJob):
             self._enumerate_func.add(func)
 
     @runs_in_hwd_thread
-    def create_client(self, device: 'Device', handler: Optional['HardwareHandlerBase'],
-                      plugin: 'HW_PluginBase') -> Optional['HardwareClientBase']:
+    def create_client(self, device: 'Device', plugin: 'HW_PluginBase', *,
+                      keystore: 'Hardware_KeyStore' = None) -> Optional['HardwareClientBase']:
+        """Returns the client of device, creating it if needed. A new client serves keystore, if given."""
         # Get from cache first
         client = self._client_by_id(device.id_)
         if client:
             return client
-        client = plugin.create_client(device, handler)
+        client = plugin.create_client(device, keystore.get_handler() if keystore else None)
         if client:
+            if keystore:
+                client.set_keystore(keystore)
             self.logger.info(f"Registering {client}")
             with self.lock:
                 self._clients[client] = device.id_
@@ -1297,6 +1304,17 @@ class DeviceMgr(ThreadJob):
             _id = self.pairing_code_to_id.pop(pairing_code)
         self._close_client(_id)
 
+    def release_keystore(self, keystore: 'Hardware_KeyStore') -> None:
+        """The keystore no longer uses its device, e.g. because its wallet was closed.
+        Unpairs the device, unless other keystores still use it."""
+        with self.lock:
+            id_ = self._keystore_to_id.pop(keystore, None)
+            if id_ is None:
+                id_ = self.pairing_code_to_id.get(keystore.pairing_code())
+            still_used = id_ is not None and id_ in self._keystore_to_id.values()
+        if not still_used:
+            self.unpair_pairing_code(keystore.pairing_code())
+
     def unpair_id(self, id_):
         pairing_code = self.pairing_code_by_id(id_)
         if pairing_code:
@@ -1307,6 +1325,7 @@ class DeviceMgr(ThreadJob):
     def _close_client(self, id_):
         if client := self._forget_client(id_):
             self._try_close_client(client)
+        self._unbind_device(id_)
 
     def _forget_client(self, id_) -> Optional['HardwareClientBase']:
         with self.lock:
@@ -1334,6 +1353,7 @@ class DeviceMgr(ThreadJob):
             if pairing_code := self.pairing_code_by_id(id_):
                 del self.pairing_code_to_id[pairing_code]
             client = self._forget_client(id_)
+        self._unbind_device(id_)
         if not client:
             return
         if threading.current_thread().name.startswith("hwd_comms_thread"):
@@ -1348,14 +1368,50 @@ class DeviceMgr(ThreadJob):
                 self.logger.info(f"failed to abort the operation on the removed device: {e!r}")
             # closing does device I/O: queue it on the hwd thread instead of waiting for it
             _hwd_comms_executor.submit(self._try_close_client, client)
-        if client.handler:
-            client.handler.update_status(False)
 
     def _client_by_id(self, id_) -> Optional['HardwareClientBase']:
         for client, client_id in self.clients.items():
             if client_id == id_:
                 return client
         return None
+
+    def get_bound_client(self, keystore: 'Hardware_KeyStore') -> Optional['HardwareClientBase']:
+        """The client of the device keystore is bound to, if any. Does no device I/O."""
+        with self.lock:
+            id_ = self._keystore_to_id.get(keystore)
+            return self._client_by_id(id_) if id_ is not None else None
+
+    def _bind_keystore(self, keystore: 'Hardware_KeyStore', client: 'HardwareClientBase') -> None:
+        with self.lock:
+            id_ = self._clients.get(client)
+            if id_ is None:  # forgotten meanwhile, e.g. the device was unplugged
+                return
+            self._keystore_to_id[keystore] = id_
+        # the other keystores bound to the device were informed when they were bound
+        self._notify_status([keystore], True)
+
+    def _unbind_keystore(self, keystore: 'Hardware_KeyStore') -> None:
+        with self.lock:
+            self._keystore_to_id.pop(keystore, None)
+        self._notify_status([keystore], False)
+
+    def _unbind_device(self, id_: str) -> None:
+        with self.lock:
+            keystores = [keystore for keystore, id2 in self._keystore_to_id.items() if id2 == id_]
+            for keystore in keystores:
+                del self._keystore_to_id[keystore]
+        self._notify_status(keystores, False)
+
+    @staticmethod
+    def _notify_status(keystores: Sequence['Hardware_KeyStore'], paired: bool) -> None:
+        # keystores can share a handler, e.g. on QML, where there is one per device
+        handlers = []
+        for keystore in keystores:
+            handler = keystore.get_handler()
+            if handler is not None and not any(handler is h for h in handlers):
+                handlers.append(handler)
+        for handler in handlers:
+            handler.update_status(paired)
 
     def client_by_id(self, id_, *, scan_now: bool = True) -> Optional['HardwareClientBase']:
         """Returns a client for the device ID if one is registered.  If
@@ -1366,42 +1422,45 @@ class DeviceMgr(ThreadJob):
         return self._client_by_id(id_)
 
     @runs_in_hwd_thread
-    def client_for_keystore(self, plugin: 'HW_PluginBase', handler: Optional['HardwareHandlerBase'],
-                            keystore: 'Hardware_KeyStore',
+    def client_for_keystore(self, plugin: 'HW_PluginBase', keystore: 'Hardware_KeyStore',
                             force_pair: bool, *,
                             devices: Sequence['Device'] = None,
                             allow_user_interaction: bool = True) -> Optional['HardwareClientBase']:
         self.logger.info("getting client for keystore")
-        if handler is None:
+        if keystore.get_handler() is None:
             raise Exception(_("Handler not found for {}").format(plugin.name) + '\n' + _("A library is probably missing."))
-        handler.update_status(False)
         pcode = keystore.pairing_code()
         client = None
-        # search existing clients first (fast-path)
-        if not devices:
-            client = self.client_by_pairing_code(plugin=plugin, pairing_code=pcode, handler=handler, devices=[])
-        # search clients again, now allowing a (slow) scan
-        if client is None:
-            if devices is None:
-                devices = self.scan_devices()
-            client = self.client_by_pairing_code(plugin=plugin, pairing_code=pcode, handler=handler, devices=devices)
-        if client is None and force_pair:
-            try:
-                info = self.select_device(plugin, handler, keystore, devices,
-                                          allow_user_interaction=allow_user_interaction)
-            except CannotAutoSelectDevice:
-                pass
-            else:
-                client = self.force_pair_keystore(plugin=plugin, handler=handler, info=info, keystore=keystore)
+        try:
+            # search existing clients first (fast-path)
+            if not devices:
+                client = self.client_by_pairing_code(plugin=plugin, pairing_code=pcode, keystore=keystore, devices=[])
+            # search clients again, now allowing a (slow) scan
+            if client is None:
+                if devices is None:
+                    devices = self.scan_devices()
+                client = self.client_by_pairing_code(plugin=plugin, pairing_code=pcode, keystore=keystore, devices=devices)
+            if client is None and force_pair:
+                try:
+                    info = self.select_device(plugin, keystore, devices,
+                                              allow_user_interaction=allow_user_interaction)
+                except CannotAutoSelectDevice:
+                    pass
+                else:
+                    client = self.force_pair_keystore(plugin=plugin, info=info, keystore=keystore)
+        finally:
+            if client is None:  # not found, or failed, e.g. the user cancelled
+                self._unbind_keystore(keystore)
         if client:
-            handler.update_status(True)
+            client.set_keystore(keystore)
+            self._bind_keystore(keystore, client)
             # note: if select_device was called, we might also update label etc here:
             keystore.opportunistically_fill_in_missing_info_from_device(client)
         self.logger.info("end client for keystore")
         return client
 
     def client_by_pairing_code(
-        self, *, plugin: 'HW_PluginBase', pairing_code: str, handler: 'HardwareHandlerBase',
+        self, *, plugin: 'HW_PluginBase', pairing_code: str, keystore: 'Hardware_KeyStore',
         devices: Sequence['Device'],
     ) -> Optional['HardwareClientBase']:
         _id = self.id_by_pairing_code(pairing_code)
@@ -1409,20 +1468,16 @@ class DeviceMgr(ThreadJob):
         if client:
             if type(client.plugin) != type(plugin):
                 return
-            # An unpaired client might have another wallet's handler
-            # from a prior scan.  Replace to fix dialog parenting.
-            client.handler = handler
             return client
 
         for device in devices:
             if device.id_ == _id:
-                return self.create_client(device, handler, plugin)
+                return self.create_client(device, plugin, keystore=keystore)
 
     def force_pair_keystore(
         self,
         *,
         plugin: 'HW_PluginBase',
-        handler: 'HardwareHandlerBase',
         info: 'DeviceInfo',
         keystore: 'Hardware_KeyStore',
     ) -> 'HardwareClientBase':
@@ -1432,8 +1487,7 @@ class DeviceMgr(ThreadJob):
         xtype = bip32.xpub_type(xpub)
         client = self._client_by_id(info.device.id_)
         if client and client.is_pairable() and type(client.plugin) == type(plugin):
-            # See comment above for same code
-            client.handler = handler
+            client.set_keystore(keystore)  # so that the prompts below go to the keystore's handler
             # This will trigger a PIN/passphrase entry request
             try:
                 client_xpub = client.get_xpub(derivation, xtype)
@@ -1458,13 +1512,14 @@ class DeviceMgr(ThreadJob):
     def list_pairable_device_infos(
         self,
         *,
-        handler: Optional['HardwareHandlerBase'],
         plugin: 'HW_PluginBase',
+        keystore: 'Hardware_KeyStore' = None,
         devices: Sequence['Device'] = None,
         include_failing_clients: bool = False,
     ) -> List['DeviceInfo']:
         """Returns a list of DeviceInfo objects: one for each connected device accepted by the plugin.
         Already paired devices are also included, as it is okay to reuse them.
+        New clients serve keystore, if given; without it, they have no handler.
         """
         if not plugin.libraries_available:
             message = plugin.get_library_not_available_message()
@@ -1476,12 +1531,12 @@ class DeviceMgr(ThreadJob):
             if not plugin.can_recognize_device(device):
                 continue
             try:
-                client = self.create_client(device, handler, plugin)
+                client = self.create_client(device, plugin, keystore=keystore)
                 if not client:
                     continue
                 # since we just enumerate devices here, avoid entering pairing flow. avoiding pairing is also
-                # implicitly done when handler is None, but since we cache client, it can have gained a handler,
-                # leading to pairing being triggered on second enumeration.
+                # implicitly done when the client has no handler, but a cached client can have one (it serves
+                # a keystore or a wizard), which would trigger pairing on a later enumeration.
                 infos.append(client.get_device_info_for_enumeration())
             except Exception as e:
                 self.logger.error(f'failed to create client for {plugin.name} at {device.path}: {repr(e)}')
@@ -1491,14 +1546,15 @@ class DeviceMgr(ThreadJob):
 
         return infos
 
-    def select_device(self, plugin: 'HW_PluginBase', handler: 'HardwareHandlerBase',
-                      keystore: 'Hardware_KeyStore', devices: Sequence['Device'] = None,
+    def select_device(self, plugin: 'HW_PluginBase', keystore: 'Hardware_KeyStore',
+                      devices: Sequence['Device'] = None,
                       *, allow_user_interaction: bool = True) -> 'DeviceInfo':
         """Select the device to use for keystore."""
+        handler = keystore.get_handler()
         # ideally this should not be called from the GUI thread...
         # assert handler.get_gui_thread() != threading.current_thread(), 'must not be called from GUI thread'
         while True:
-            infos = self.list_pairable_device_infos(handler=handler, plugin=plugin, devices=devices)
+            infos = self.list_pairable_device_infos(plugin=plugin, keystore=keystore, devices=devices)
             if infos:
                 break
             if not allow_user_interaction:
@@ -1604,11 +1660,10 @@ class DeviceMgr(ThreadJob):
             else:
                 devices.extend(new_devices)
 
-        # find out what was disconnected
+        # find out what was disconnected. note: pinging does device I/O, so not while holding the lock
         client_ids = [dev.id_ for dev in devices]
-        with self.lock:
-            disconnected_ids = [id_ for client, id_ in self._clients.items()
-                                if id_ not in client_ids or not client.has_usable_connection_with_device()]
+        disconnected_ids = [id_ for client, id_ in self.clients.items()
+                            if id_ not in client_ids or not client.has_usable_connection_with_device()]
         for id_ in disconnected_ids:
             self.on_device_removed(id_)
 

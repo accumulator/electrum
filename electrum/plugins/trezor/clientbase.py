@@ -1,4 +1,5 @@
 import time
+from contextlib import ExitStack
 from struct import pack
 from typing import TYPE_CHECKING
 
@@ -53,8 +54,8 @@ MESSAGES = {
 CANCEL_SUPPORTED = frozenset({models.T1B1, models.T2T1, models.T2B1, models.T3T1, models.T3B1})
 
 class TrezorClientBase(HardwareClientBase, Logger):
-    def __init__(self, device_descriptor: 'Device', transport, handler, plugin):
-        HardwareClientBase.__init__(self, plugin=plugin, device_descriptor=device_descriptor, handler=handler)
+    def __init__(self, device_descriptor: 'Device', transport, plugin):
+        HardwareClientBase.__init__(self, plugin=plugin, device_descriptor=device_descriptor)
         Logger.__init__(self)
 
         if plugin.is_outdated_fw_ignored():
@@ -92,13 +93,13 @@ class TrezorClientBase(HardwareClientBase, Logger):
         if self.is_paired():
             return
 
-        assert self.handler is not None, "No UI handler for pairing"
+        assert self.get_handler() is not None, "No UI handler for pairing"
 
         pairing = self.client.pairing
         with self.client:
             try:
                 method = CodeEntry(pairing)
-                code = self.handler.get_word(_("Enter 6-digit pairing code:"))
+                code = self.get_handler().get_word(_("Enter 6-digit pairing code:"))
                 method.send_code(code)
 
                 assert pairing.state is ControllerLifecycle.PAIRING_COMPLETED
@@ -111,7 +112,7 @@ class TrezorClientBase(HardwareClientBase, Logger):
     @property
     def session(self):
         if self._session is None:
-            assert self.handler is not None, "No UI handler for session"
+            assert self.get_handler() is not None, "No UI handler for session"
             self.pair_if_needed()
             self.client.ensure_unlocked()  # unlock device so features are populated and we know about passphrase
 
@@ -137,13 +138,18 @@ class TrezorClientBase(HardwareClientBase, Logger):
         self.msg = message
         self.creating_wallet = creating_wallet
         self.prevent_timeouts()
+        self._flow_exit_stack = ExitStack()
+        self._flow_exit_stack.enter_context(self.fixed_handler())
         return self
 
     def end_flow(self):
         self.in_flow = False
         self.msg = None
         self.creating_wallet = False
-        self.handler.finished()
+        try:
+            self.get_handler().finished()
+        finally:
+            self._flow_exit_stack.close()
         self.used()
 
     def __enter__(self):
@@ -382,7 +388,7 @@ class TrezorClientBase(HardwareClientBase, Logger):
     def button_request(self, br):
         message = self.msg or MESSAGES.get(br.code) or MESSAGES['default']
         on_cancel = self.client.cancel if self.client.model in CANCEL_SUPPORTED else None
-        self.handler.show_message(message.format(self.device), on_cancel)
+        self.get_handler().show_message(message.format(self.device), on_cancel)
 
     def get_pin(self, code=None):
         show_strength = True
@@ -394,7 +400,8 @@ class TrezorClientBase(HardwareClientBase, Logger):
         else:
             msg = _("Enter your current {} PIN:")
             show_strength = False
-        pin = self.handler.get_pin(msg.format(self.device), show_strength=show_strength)
+        handler = self.get_handler()
+        pin = handler.get_pin(msg.format(self.device), show_strength=show_strength)
         if not pin:
             raise Cancelled
         # check PIN length. Depends on model and firmware version
@@ -407,7 +414,7 @@ class TrezorClientBase(HardwareClientBase, Logger):
             if (2, 4, 0) <= self.client.version:
                 limit = 50
         if len(pin) > limit:
-            self.handler.show_error(_('The PIN cannot be longer than {} characters.').format(limit))
+            handler.show_error(_('The PIN cannot be longer than {} characters.').format(limit))
             raise Cancelled
         return pin
 
@@ -420,8 +427,9 @@ class TrezorClientBase(HardwareClientBase, Logger):
         else:
             msg = _("Enter the passphrase to unlock this wallet:")
 
-        self.handler.passphrase_on_device = available_on_device
-        passphrase = self.handler.get_passphrase(msg, self.creating_wallet)
+        handler = self.get_handler()
+        handler.passphrase_on_device = available_on_device
+        passphrase = handler.get_passphrase(msg, self.creating_wallet)
         if passphrase is PassphraseSetting.ON_DEVICE:
             return passphrase
         if passphrase is None:
@@ -429,13 +437,13 @@ class TrezorClientBase(HardwareClientBase, Logger):
         passphrase = bip39_normalize_passphrase(passphrase)
         length = len(passphrase)
         if length > 50:
-            self.handler.show_error(_("Too long passphrase ({} > 50 chars).").format(length))
+            handler.show_error(_("Too long passphrase ({} > 50 chars).").format(length))
             raise Cancelled
         return passphrase
 
     def _matrix_char(self, matrix_type):
         num = 9 if matrix_type == WordRequestType.Matrix9 else 6
-        char = self.handler.get_matrix(num)
+        char = self.get_handler().get_matrix(num)
         if char == 'x':
             raise Cancelled
         return char
@@ -452,7 +460,7 @@ class TrezorClientBase(HardwareClientBase, Logger):
             nonlocal step
             step += 1
             msg = _("Step {}/24.  Enter seed word as explained on your {}:").format(step, self.device)
-            word = self.handler.get_word(msg)
+            word = self.get_handler().get_word(msg)
             if not word:
                 raise Cancelled
             return word

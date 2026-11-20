@@ -22,7 +22,7 @@ from electrum.bitcoin import OnchainOutputType
 
 import electrum.bitcoin as bitcoin
 
-from electrum.hw_wallet import HW_PluginBase, HardwareClientBase, HardwareHandlerBase
+from electrum.hw_wallet import HW_PluginBase, HardwareClientBase
 
 if TYPE_CHECKING:
     from electrum.wizard import NewWalletWizard
@@ -71,9 +71,8 @@ class BitBox02NotPaired(UserFacingException):
 
 
 class BitBox02Client(HardwareClientBase):
-    # handler is a BitBox02_Handler, importing it would lead to a circular dependency
-    def __init__(self, handler: HardwareHandlerBase, device_descriptor: 'Device', config: SimpleConfig, *, plugin: HW_PluginBase):
-        HardwareClientBase.__init__(self, plugin=plugin, device_descriptor=device_descriptor, handler=handler)
+    def __init__(self, device_descriptor: 'Device', config: SimpleConfig, *, plugin: HW_PluginBase):
+        HardwareClientBase.__init__(self, plugin=plugin, device_descriptor=device_descriptor)
         self.bitbox02_device = None  # type: Optional[bitbox02.BitBox02]
         self.config = config
         self.bitbox_hid_info = None
@@ -124,7 +123,7 @@ class BitBox02Client(HardwareClientBase):
 
     @runs_in_hwd_thread
     def get_soft_device_id(self, *, avoid_pairing: bool = False) -> Optional[str]:
-        if (avoid_pairing and not self.bitbox02_device) or self.handler is None:
+        if (avoid_pairing and not self.bitbox02_device) or self.get_handler() is None:
             # Can't do the pairing without the handler. This happens at wallet creation time, when
             # listing the devices.
             return None
@@ -134,9 +133,11 @@ class BitBox02Client(HardwareClientBase):
 
     @runs_in_hwd_thread
     def pairing_dialog(self):
+        handler = self.get_handler()
+
         def pairing_step(code: str, device_response: Callable[[], bool]) -> bool:
             msg = "Please compare and confirm the pairing code on your BitBox02:\n\n" + code
-            self.handler.show_message(msg, on_cancel=lambda: self.hid_device.close())
+            handler.show_message(msg, on_cancel=lambda: self.hid_device.close())
             try:
                 res = device_response()
             except Exception:
@@ -144,7 +145,7 @@ class BitBox02Client(HardwareClientBase):
                 self.hid_device.close()
                 raise
             finally:
-                self.handler.finished()
+                handler.finished()
             return res
 
         def exists_remote_static_pubkey(pubkey: bytes) -> bool:
@@ -177,7 +178,7 @@ class BitBox02Client(HardwareClientBase):
             self.config.set_key("bitbox02", bitbox02_config)
 
         def attestation_warning() -> None:
-            self.handler.show_error(
+            handler.show_error(
                 "The BitBox02 attestation failed.\nTry reconnecting the BitBox02.\nWarning: The device might not be genuine, if the\n problem persists please contact Shift support.",
                 blocking=True
             )
@@ -205,11 +206,11 @@ class BitBox02Client(HardwareClientBase):
                 return set_noise_privkey(privkey)
 
         if self.bitbox02_device is None:
-            self.hid_device = self.handler.open_hid_device(self.device_descriptor)
+            self.hid_device = handler.open_hid_device(self.device_descriptor)
             # bitbox02 module needs 'serial_number', which is only available after opening connection
             self.bitbox_hid_info['serial_number'] = self.hid_device.get_serial_number_string()
 
-            self.handler.show_message(
+            handler.show_message(
                 f'Please unlock your {self.bitbox_hid_info["product_string"]} device',
                 on_cancel=lambda: self.hid_device.close()
             )
@@ -228,7 +229,7 @@ class BitBox02Client(HardwareClientBase):
             except FirmwareVersionOutdatedException:
                 raise
             else:
-                self.handler.finished()
+                handler.finished()
             self.bitbox02_device = bitbox02_device
 
         self.fail_if_not_initialized()
@@ -291,7 +292,7 @@ class BitBox02Client(HardwareClientBase):
 
     @runs_in_hwd_thread
     def label(self, *, avoid_pairing: bool = False) -> str:
-        if (avoid_pairing and not self.bitbox02_device) or self.handler is None:
+        if (avoid_pairing and not self.bitbox02_device) or self.get_handler() is None:
             # Can't do the pairing without the handler. This happens at wallet creation time, when
             # listing the devices.
             return super().label()
@@ -347,7 +348,7 @@ class BitBox02Client(HardwareClientBase):
             coin, multisig_config, account_keypath
         )
         if not is_registered:
-            name = self.handler.name_multisig_account()
+            name = self.get_handler().name_multisig_account()
             try:
                 self.bitbox02_device.btc_register_script_config(
                     coin=coin,
@@ -590,7 +591,7 @@ class BitBox02_KeyStore(Hardware_KeyStore):
     def give_error(self, message: str | BaseException):
         self.logger.info(message)
         if not self.ux_busy:
-            self.handler.show_error(str(message))
+            self.get_handler().show_error(str(message))
         else:
             self.ux_busy = False
         raise UserFacingException(message)
@@ -613,6 +614,7 @@ class BitBox02_KeyStore(Hardware_KeyStore):
 
     @runs_in_hwd_thread
     def sign_transaction(self, tx: PartialTransaction, password: str):
+        handler = self.get_handler()
         if tx.is_complete():
             return
         client = self.get_client()
@@ -620,10 +622,10 @@ class BitBox02_KeyStore(Hardware_KeyStore):
 
         try:
             try:
-                self.handler.show_message("Authorize Transaction...")
-                client.sign_transaction(self, tx, self.handler.get_wallet())
+                handler.show_message("Authorize Transaction...")
+                client.sign_transaction(self, tx, self.get_wallet())
             finally:
-                self.handler.finished()
+                handler.finished()
 
         except Exception as e:
             self.logger.exception("")
@@ -634,19 +636,20 @@ class BitBox02_KeyStore(Hardware_KeyStore):
     def show_address(
         self, sequence: Tuple[int, int], txin_type: str, wallet: Deterministic_Wallet
     ):
+        handler = self.get_handler()
         client = self.get_client()
         address_path = "{}/{}/{}".format(
             self.get_derivation_prefix(), sequence[0], sequence[1]
         )
         try:
             try:
-                self.handler.show_message(_("Showing address ..."))
+                handler.show_message(_("Showing address ..."))
                 dev_addr = client.show_address(address_path, txin_type, wallet)
             finally:
-                self.handler.finished()
+                handler.finished()
         except Exception as e:
             self.logger.exception("")
-            self.handler.show_error(str(e))
+            handler.show_error(str(e))
 
 
 class BitBox02Plugin(HW_PluginBase):
@@ -686,7 +689,7 @@ class BitBox02Plugin(HW_PluginBase):
 
     @runs_in_hwd_thread
     def create_client(self, device_descriptor: 'Device', handler) -> BitBox02Client:
-        return BitBox02Client(handler, device_descriptor, self.config, plugin=self)
+        return BitBox02Client(device_descriptor, self.config, plugin=self)
 
     @runs_in_hwd_thread
     def show_address(

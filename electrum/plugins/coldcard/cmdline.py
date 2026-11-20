@@ -2,6 +2,7 @@ from electrum.plugin import hook
 from electrum.util import print_msg, raw_input, print_stderr
 from electrum.logging import get_logger
 
+from electrum.hw_wallet import constant_handler_delegate
 from electrum.hw_wallet.cmdline import CmdLineHandler
 
 from .coldcard import ColdcardPlugin
@@ -41,7 +42,7 @@ class Plugin(ColdcardPlugin):
     def init_keystore(self, keystore):
         if not isinstance(keystore, self.keystore_class):
             return
-        keystore.handler = self.handler
+        keystore.set_handler_delegate(constant_handler_delegate(self.handler))
 
     def create_handler(self, window):
         return self.handler

@@ -1,7 +1,9 @@
+import gc
 import os
 import sys
 import threading
 import time
+import weakref
 
 from types import SimpleNamespace
 from unittest import mock
@@ -10,7 +12,9 @@ from electrum import util
 from electrum import plugin as plugin_module
 from electrum.crypto import sha256
 from electrum.plugin import (Plugins, IncorrectPluginHash, PluginMetadata, DeviceMgr, _hwd_comms_executor,
-                             runs_in_hwd_thread)
+                             runs_in_hwd_thread, run_in_hwd_thread)
+from electrum.hw_wallet import HW_PluginBase, HardwareClientBase, constant_handler_delegate
+from electrum.keystore import Hardware_KeyStore
 from electrum.zip_importer import MemoryZipImporter
 from electrum.simple_config import SimpleConfig
 
@@ -166,12 +170,40 @@ class FakeHandler:
         self.statuses.append(paired)
 
 
-class FakeClient:
-    def __init__(self, handler):
-        self.handler = handler
+class FakePlugin:
+    name = 'fake'
+    close_keystore = HW_PluginBase.close_keystore
+
+    def __init__(self, devmgr: DeviceMgr):
+        self._devmgr = devmgr
+
+    def device_manager(self) -> DeviceMgr:
+        return self._devmgr
+
+
+class FakeThread:
+    def __init__(self):
+        self.stopped = False
+
+    def stop(self):
+        self.stopped = True
+
+
+class FakeClient(HardwareClientBase):
+    def __init__(self, plugin: FakePlugin, id_: str):
+        HardwareClientBase.__init__(self, plugin=plugin, device_descriptor=SimpleNamespace(id_=id_))
         self.aborted = False
         self.closed_on = None  # name of the thread that closed the client
         self.usable = True
+
+    def is_pairable(self):
+        return True
+
+    def is_initialized(self):
+        return True
+
+    def get_xpub(self, bip32_path, xtype):
+        raise NotImplementedError()
 
     def has_usable_connection_with_device(self):
         return self.usable
@@ -184,15 +216,63 @@ class FakeClient:
         self.closed_on = threading.current_thread().name
 
 
+class FakeKeystore(Hardware_KeyStore):
+    hw_type = 'fake'
+    device = 'Fake'
+
+    def __init__(self, plugin: FakePlugin, soft_device_id: str, handler: FakeHandler = None):
+        Hardware_KeyStore.__init__(self, {'soft_device_id': soft_device_id})
+        self.plugin = plugin
+        if handler is not None:
+            self.set_handler_delegate(constant_handler_delegate(handler))
+
+    def opportunistically_fill_in_missing_info_from_device(self, client):
+        pass
+
+    def decrypt_message(self, sequence, message, password):
+        raise NotImplementedError()
+
+    def sign_message(self, sequence, message, password, *, script_type=None):
+        raise NotImplementedError()
+
+    def sign_transaction(self, tx, password):
+        raise NotImplementedError()
+
+
+class HardwareKeystoreTestCase(ElectrumTestCase):
+
+    def test_wallet_link_does_not_keep_the_wallet_alive(self):
+        class FakeWallet:
+            pass
+        keystore = FakeKeystore(FakePlugin(DeviceMgr(SimpleConfig({'electrum_path': self.electrum_path}))), 'abc')
+        wallet = FakeWallet()
+        keystore.set_wallet(wallet)
+        self.assertIs(wallet, keystore.get_wallet())
+        del wallet
+        gc.collect()
+        self.assertIsNone(keystore.get_wallet())
+
+
 class DeviceMgrTestCase(ElectrumTestCase):
 
     def setUp(self):
         super().setUp()
         self.devmgr = DeviceMgr(SimpleConfig({'electrum_path': self.electrum_path}))
+        self.plugin = FakePlugin(self.devmgr)
+        self.client = self._add_client('dev1')
         self.handler = FakeHandler()
-        self.client = FakeClient(self.handler)
-        self.devmgr._clients[self.client] = 'dev1'
-        self.devmgr.pairing_code_to_id['bitbox02/abc'] = 'dev1'
+        # a wallet's keystore, paired with dev1
+        self.keystore = FakeKeystore(self.plugin, 'abc', self.handler)
+        self.devmgr.pairing_code_to_id[self.keystore.pairing_code()] = 'dev1'
+        self.devmgr._keystore_to_id[self.keystore] = 'dev1'
+
+    def _add_client(self, id_: str) -> FakeClient:
+        client = run_in_hwd_thread(lambda: FakeClient(self.plugin, id_))  # clients are created on the hwd thread
+        self.devmgr._clients[client] = id_
+        return client
+
+    def _client_for(self, keystore: FakeKeystore):
+        return self.devmgr.client_for_keystore(self.plugin, keystore, force_pair=False, devices=[])
 
     def _block_hwd_thread(self) -> threading.Event:
         """Keeps the hwd thread busy until the returned event is set, like an operation waiting on the device."""
@@ -212,7 +292,8 @@ class DeviceMgrTestCase(ElectrumTestCase):
         self.assertLess(time.monotonic() - t0, 1)
         # invalidated right away
         self.assertIsNone(self.devmgr._client_by_id('dev1'))
-        self.assertIsNone(self.devmgr.id_by_pairing_code('bitbox02/abc'))
+        self.assertIsNone(self.devmgr.id_by_pairing_code('fake/abc'))
+        self.assertIsNone(self.devmgr.get_bound_client(self.keystore))
         self.assertTrue(self.client.aborted)
         self.assertEqual([False], self.handler.statuses)
         # closed on the hwd thread, once that is free
@@ -228,7 +309,7 @@ class DeviceMgrTestCase(ElectrumTestCase):
         self.assertEqual([], self.handler.statuses)
 
     def test_on_device_removed_without_handler(self):
-        self.client.handler = None
+        self.keystore.set_handler_delegate(None)
         self.devmgr.on_device_removed('dev1')
         self.assertIsNone(self.devmgr._client_by_id('dev1'))
         self.assertTrue(self.client.aborted)
@@ -258,7 +339,7 @@ class DeviceMgrTestCase(ElectrumTestCase):
         closed_on = self._scan()
         self.assertTrue(closed_on.startswith('hwd_comms_thread'))
         self.assertIsNone(self.devmgr._client_by_id('dev1'))
-        self.assertIsNone(self.devmgr.id_by_pairing_code('bitbox02/abc'))
+        self.assertIsNone(self.devmgr.id_by_pairing_code('fake/abc'))
         self.assertEqual([False], self.handler.statuses)
         self.assertFalse(self.client.aborted)  # not on the hwd thread
 
@@ -278,4 +359,167 @@ class DeviceMgrTestCase(ElectrumTestCase):
         self.devmgr.unpair_id('dev1')
         self.assertIsNotNone(self.client.closed_on)
         self.assertIsNone(self.devmgr._client_by_id('dev1'))
-        self.assertIsNone(self.devmgr.id_by_pairing_code('bitbox02/abc'))
+        self.assertIsNone(self.devmgr.id_by_pairing_code('fake/abc'))
+        self.assertEqual([False], self.handler.statuses)
+
+    # --- routing ---
+
+    def test_client_serves_the_last_requesting_keystore(self):
+        handler2 = FakeHandler()
+        keystore2 = FakeKeystore(self.plugin, 'abc', handler2)  # another wallet using the same device
+        self.assertIs(self.client, self._client_for(self.keystore))
+        self.assertIs(self.handler, self.client.get_handler())
+        self.assertIs(self.client, self._client_for(keystore2))
+        self.assertIs(handler2, self.client.get_handler())
+        # both are bound to the device, and were told so
+        self.assertIs(self.client, self.devmgr.get_bound_client(self.keystore))
+        self.assertIs(self.client, self.devmgr.get_bound_client(keystore2))
+        self.assertEqual([True], self.handler.statuses)
+        self.assertEqual([True], handler2.statuses)
+        # the keystore's own handler does not follow the client
+        self.assertIs(self.handler, self.keystore.get_handler())
+
+    def test_delegate_gets_its_context(self):
+        calls = []
+
+        def delegate(*, keystore, client):
+            calls.append((keystore, client))
+            return self.handler
+        keystore = FakeKeystore(self.plugin, 'xyz')
+        keystore.set_handler_delegate(delegate)
+        # from the keystore: itself, and the client of the device it is bound to, if any
+        keystore.get_handler()
+        self.devmgr._keystore_to_id[keystore] = 'dev1'
+        keystore.get_handler()
+        # from a client serving the keystore: both
+        self.client.set_keystore(keystore)
+        self.client.get_handler()
+        # from a client serving a user without a keystore, e.g. a wizard: the client
+        self.client.set_handler_delegate(delegate)
+        self.client.get_handler()
+        self.assertEqual(
+            [(keystore, None), (keystore, self.client), (keystore, self.client), (None, self.client)],
+            calls)
+
+    def test_user_without_keystore(self):
+        wizard_handler = FakeHandler()
+        wizard_delegate = constant_handler_delegate(wizard_handler)
+        self.client.set_keystore(self.keystore)
+        self.client.set_handler_delegate(wizard_delegate)  # a wizard takes over the device
+        self.assertIs(wizard_handler, self.client.get_handler())
+        self.client.set_keystore(self.keystore)  # and a wallet takes it back
+        self.assertIs(self.handler, self.client.get_handler())
+        # releasing does not undo the route of another user
+        self.client.release_handler_delegate(wizard_delegate)
+        self.assertIs(self.handler, self.client.get_handler())
+        self.client.set_handler_delegate(wizard_delegate)
+        self.client.release_handler_delegate(wizard_delegate)
+        self.assertIsNone(self.client.get_handler())
+
+    def test_route_and_binding_do_not_keep_the_keystore_alive(self):
+        keystore = FakeKeystore(self.plugin, 'xyz', FakeHandler())
+        self.client.set_keystore(keystore)
+        self.devmgr._keystore_to_id[keystore] = 'dev1'
+        keystore_ref = weakref.ref(keystore)
+        del keystore
+        gc.collect()
+        self.assertIsNone(keystore_ref())
+        self.assertIsNone(self.client.get_handler())
+        self.assertEqual([self.keystore], list(self.devmgr._keystore_to_id))
+
+    def test_fixed_handler(self):
+        handler2 = FakeHandler()
+        keystore2 = FakeKeystore(self.plugin, 'abc', handler2)
+        self.client.set_keystore(self.keystore)
+        with self.client.fixed_handler():
+            self.client.set_keystore(keystore2)  # another wallet takes over the device during the flow
+            self.assertIs(self.handler, self.client.get_handler())
+            with self.client.fixed_handler():  # nested: the outer flow keeps its handler
+                self.assertIs(self.handler, self.client.get_handler())
+            self.assertIs(self.handler, self.client.get_handler())
+        self.assertIs(handler2, self.client.get_handler())
+
+    # --- status ---
+
+    def test_removal_informs_every_keystore_of_the_device(self):
+        handler2, handler3 = FakeHandler(), FakeHandler()
+        keystore2 = FakeKeystore(self.plugin, 'abc', handler2)  # another wallet using dev1
+        keystore3 = FakeKeystore(self.plugin, 'def', handler3)  # a wallet using dev2
+        client2 = self._add_client('dev2')
+        self.devmgr._keystore_to_id[keystore2] = 'dev1'
+        self.devmgr._keystore_to_id[keystore3] = 'dev2'
+        self.devmgr.on_device_removed('dev1')
+        self._drain_hwd_thread()
+        self.assertEqual([False], self.handler.statuses)
+        self.assertEqual([False], handler2.statuses)
+        self.assertEqual([], handler3.statuses)
+        self.assertIsNone(self.devmgr.get_bound_client(keystore2))
+        self.assertIs(client2, self.devmgr.get_bound_client(keystore3))
+
+    def test_unpair_informs_every_keystore_of_the_device(self):
+        handler2 = FakeHandler()
+        keystore2 = FakeKeystore(self.plugin, 'abc', handler2)
+        self.devmgr._keystore_to_id[keystore2] = 'dev1'
+        self.devmgr.unpair_pairing_code('fake/abc')
+        self.assertEqual([False], self.handler.statuses)
+        self.assertEqual([False], handler2.statuses)
+
+    def test_shared_handler_is_informed_once(self):
+        keystore2 = FakeKeystore(self.plugin, 'abc', self.handler)  # e.g. on QML, there is one handler per device
+        self.devmgr._keystore_to_id[keystore2] = 'dev1'
+        self.devmgr.unpair_id('dev1')
+        self.assertEqual([False], self.handler.statuses)
+
+    def test_failed_lookup_informs_only_the_requester(self):
+        handler2 = FakeHandler()
+        keystore2 = FakeKeystore(self.plugin, 'xyz', handler2)  # its device is not connected
+        self.assertIsNone(self._client_for(keystore2))
+        self.assertEqual([False], handler2.statuses)
+        self.assertEqual([], self.handler.statuses)
+
+    def test_lookup_without_handler_fails(self):
+        keystore2 = FakeKeystore(self.plugin, 'abc')
+        with self.assertRaises(Exception) as ctx:
+            self._client_for(keystore2)
+        self.assertIn('Handler not found', str(ctx.exception))
+
+    # --- closing ---
+
+    def test_release_keeps_a_device_that_is_still_used(self):
+        handler2 = FakeHandler()
+        keystore2 = FakeKeystore(self.plugin, 'abc', handler2)  # another wallet using dev1
+        self.devmgr._keystore_to_id[keystore2] = 'dev1'
+        self.devmgr.release_keystore(self.keystore)
+        self.assertIsNone(self.client.closed_on)
+        self.assertEqual('dev1', self.devmgr.id_by_pairing_code('fake/abc'))
+        self.assertIsNone(self.devmgr.get_bound_client(self.keystore))
+        self.assertIs(self.client, self.devmgr.get_bound_client(keystore2))
+        self.assertEqual([], handler2.statuses)
+        # the last one unpairs and closes it
+        self.devmgr.release_keystore(keystore2)
+        self.assertIsNotNone(self.client.closed_on)
+        self.assertIsNone(self.devmgr.id_by_pairing_code('fake/abc'))
+        self.assertIsNone(self.devmgr._client_by_id('dev1'))
+
+    def test_release_of_an_unbound_keystore_keeps_a_device_that_is_still_used(self):
+        keystore2 = FakeKeystore(self.plugin, 'abc', FakeHandler())  # e.g. its wallet did not pair yet
+        self.devmgr.release_keystore(keystore2)
+        self.assertIsNone(self.client.closed_on)
+        self.assertEqual('dev1', self.devmgr.id_by_pairing_code('fake/abc'))
+
+    def test_close_keystore(self):
+        keystore2 = FakeKeystore(self.plugin, 'abc', FakeHandler())  # another wallet using dev1
+        self.devmgr._keystore_to_id[keystore2] = 'dev1'
+        self.keystore.thread = thread = FakeThread()
+        self.client.set_keystore(self.keystore)
+        handler_ref = weakref.ref(self.handler)
+        self.plugin.close_keystore(self.keystore)
+        self.assertTrue(thread.stopped)
+        self.assertIsNone(self.keystore.thread)
+        self.assertIsNone(self.keystore.get_handler())
+        self.assertIsNone(self.client.get_handler())
+        self.assertIsNone(self.client.closed_on)  # keystore2 still uses the device
+        # nothing keeps the handler, and thus the closed window, alive
+        del self.handler
+        gc.collect()
+        self.assertIsNone(handler_ref())

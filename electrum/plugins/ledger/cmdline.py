@@ -1,5 +1,5 @@
 from electrum.plugin import hook
-from electrum.hw_wallet import CmdLineHandler
+from electrum.hw_wallet import CmdLineHandler, constant_handler_delegate
 
 from .ledger import LedgerPlugin
 
@@ -9,7 +9,7 @@ class Plugin(LedgerPlugin):
     def init_keystore(self, keystore):
         if not isinstance(keystore, self.keystore_class):
             return
-        keystore.handler = self.handler
+        keystore.set_handler_delegate(constant_handler_delegate(self.handler))
 
     def create_handler(self, window):
         return self.handler

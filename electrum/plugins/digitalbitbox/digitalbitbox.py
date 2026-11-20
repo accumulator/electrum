@@ -142,9 +142,10 @@ class DigitalBitboxClient(HardwareClientBase):
         _logger.warning(deprecation_warning.replace("\n", " "))
 
         global DEPRECATION_WARNING_SHOWN
-        if self.handler and not DEPRECATION_WARNING_SHOWN:
+        handler = self.get_handler()
+        if handler and not DEPRECATION_WARNING_SHOWN:
             DEPRECATION_WARNING_SHOWN = True
-            self.handler.show_warning(deprecation_warning, blocking=True)
+            handler.show_warning(deprecation_warning, blocking=True)
 
         return xpub
 
@@ -165,7 +166,7 @@ class DigitalBitboxClient(HardwareClientBase):
     def backup_password_dialog(self):
         msg = _("Enter the password used when the backup was created:")
         while True:
-            password = self.handler.get_passphrase(msg, False)
+            password = self.get_handler().get_passphrase(msg, False)
             if password is None:
                 return None
             if len(password) < 4:
@@ -179,7 +180,7 @@ class DigitalBitboxClient(HardwareClientBase):
 
     def password_dialog(self, msg):
         while True:
-            password = self.handler.get_passphrase(msg, False)
+            password = self.get_handler().get_passphrase(msg, False)
             if password is None:
                 return False
             if len(password) < 4:
@@ -253,7 +254,7 @@ class DigitalBitboxClient(HardwareClientBase):
             ChoiceItem(key="create", label=_("Create a wallet using the current seed")),
             ChoiceItem(key="erase", label=_("Erase the Digital Bitbox")),
         ]
-        reply = self.handler.query_choice(msg, choices)
+        reply = self.get_handler().query_choice(msg, choices)
         if reply is None:
             raise UserCancelled()
         if reply == "erase":
@@ -270,7 +271,7 @@ class DigitalBitboxClient(HardwareClientBase):
             ChoiceItem(key="generate", label=_("Generate a new random wallet")),
             ChoiceItem(key="load", label=_("Load a wallet from the micro SD card")),
         ]
-        reply = self.handler.query_choice(msg, choices)
+        reply = self.get_handler().query_choice(msg, choices)
         if reply is None:
             raise UserCancelled()
         if reply == "generate":
@@ -305,7 +306,7 @@ class DigitalBitboxClient(HardwareClientBase):
             ChoiceItem(key=0, label=_('Do not pair')),
             ChoiceItem(key=1, label=_('Import pairing from the Digital Bitbox desktop app')),
         ]
-        reply = self.handler.query_choice(_('Mobile pairing options'), choices)
+        reply = self.get_handler().query_choice(_('Mobile pairing options'), choices)
         if reply is None:
             raise UserCancelled()
 
@@ -328,11 +329,12 @@ class DigitalBitboxClient(HardwareClientBase):
             raise UserFacingException(reply['error']['message'])
 
     def dbb_erase(self):
-        self.handler.show_message(_("Are you sure you want to erase the Digital Bitbox?") + "\n\n" +
-                                  _("To continue, touch the Digital Bitbox's light for 3 seconds.") + "\n\n" +
-                                  _("To cancel, briefly touch the light or wait for the timeout."))
+        handler = self.get_handler()
+        handler.show_message(_("Are you sure you want to erase the Digital Bitbox?") + "\n\n" +
+                             _("To continue, touch the Digital Bitbox's light for 3 seconds.") + "\n\n" +
+                             _("To cancel, briefly touch the light or wait for the timeout."))
         hid_reply = self.hid_send_encrypt(b'{"reset":"__ERASE__"}')
-        self.handler.finished()
+        handler.finished()
         if 'error' in hid_reply:
             if hid_reply['error'].get('code') in (600, 601):
                 raise OperationCancelled()
@@ -342,11 +344,12 @@ class DigitalBitboxClient(HardwareClientBase):
             raise DeviceErased('Device erased')
 
     def dbb_load_backup(self, show_msg=True):
+        handler = self.get_handler()
         backups = self.hid_send_encrypt(b'{"backup":"list"}')
         if 'error' in backups:
             raise UserFacingException(backups['error']['message'])
         backup_choices = [ChoiceItem(key=idx, label=v) for (idx, v) in enumerate(backups['backup'])]
-        f = self.handler.query_choice(_("Choose a backup file:"), backup_choices)
+        f = handler.query_choice(_("Choose a backup file:"), backup_choices)
         if f is None:
             raise UserCancelled()
         key = self.backup_password_dialog()
@@ -354,12 +357,12 @@ class DigitalBitboxClient(HardwareClientBase):
             raise UserCancelled('No backup password provided')
         key = self.stretch_key(key)
         if show_msg:
-            self.handler.show_message(_("Loading backup...") + "\n\n" +
-                                      _("To continue, touch the Digital Bitbox's light for 3 seconds.") + "\n\n" +
-                                      _("To cancel, briefly touch the light or wait for the timeout."))
+            handler.show_message(_("Loading backup...") + "\n\n" +
+                                 _("To continue, touch the Digital Bitbox's light for 3 seconds.") + "\n\n" +
+                                 _("To cancel, briefly touch the light or wait for the timeout."))
         msg = ('{"seed":{"source": "backup", "key": "%s", "filename": "%s"}}' % (key, backups['backup'][f])).encode('utf8')
         hid_reply = self.hid_send_encrypt(msg)
-        self.handler.finished()
+        handler.finished()
         if 'error' in hid_reply:
             if hid_reply['error'].get('code') in (600, 601):
                 raise OperationCancelled()
@@ -472,6 +475,7 @@ class DigitalBitbox_KeyStore(Hardware_KeyStore):
         raise RuntimeError(_('Encryption and decryption are currently not supported for {}').format(self.device))
 
     def sign_message(self, sequence, message, password, *, script_type=None):
+        handler = self.get_handler()
         sig = None
         try:
             message = message.encode('utf8')
@@ -491,11 +495,11 @@ class DigitalBitbox_KeyStore(Hardware_KeyStore):
                 raise Exception(_("Could not sign message."))
 
             reply = dbb_client.hid_send_encrypt(msg)
-            self.handler.show_message(_("Signing message ...") + "\n\n" +
-                                      _("To continue, touch the Digital Bitbox's blinking light for 3 seconds.") + "\n\n" +
-                                      _("To cancel, briefly touch the blinking light or wait for the timeout."))
+            handler.show_message(_("Signing message ...") + "\n\n" +
+                                 _("To continue, touch the Digital Bitbox's blinking light for 3 seconds.") + "\n\n" +
+                                 _("To cancel, briefly touch the blinking light or wait for the timeout."))
             reply = dbb_client.hid_send_encrypt(msg) # Send twice, first returns an echo for smart verification (not implemented)
-            self.handler.finished()
+            handler.finished()
 
             if 'error' in reply:
                 raise Exception(reply['error']['message'])
@@ -531,6 +535,7 @@ class DigitalBitbox_KeyStore(Hardware_KeyStore):
         return sig
 
     def sign_transaction(self, tx, password):
+        handler = self.get_handler()
         if tx.is_complete():
             return
 
@@ -616,21 +621,21 @@ class DigitalBitbox_KeyStore(Hardware_KeyStore):
 
                 if self.plugin.is_mobile_paired() and tx_dbb_serialized is not None:
                     reply['tx'] = tx_dbb_serialized
-                    self.plugin.comserver_post_notification(reply, handler=self.handler)
+                    self.plugin.comserver_post_notification(reply, handler=handler)
 
                 if steps > 1:
-                    self.handler.show_message(_("Signing large transaction. Please be patient ...") + "\n\n" +
-                                              _("To continue, touch the Digital Bitbox's blinking light for 3 seconds.") + " " +
-                                              _("(Touch {} of {})").format((step + 1), steps) + "\n\n" +
-                                              _("To cancel, briefly touch the blinking light or wait for the timeout.") + "\n\n")
+                    handler.show_message(_("Signing large transaction. Please be patient ...") + "\n\n" +
+                                         _("To continue, touch the Digital Bitbox's blinking light for 3 seconds.") + " " +
+                                         _("(Touch {} of {})").format((step + 1), steps) + "\n\n" +
+                                         _("To cancel, briefly touch the blinking light or wait for the timeout.") + "\n\n")
                 else:
-                    self.handler.show_message(_("Signing transaction...") + "\n\n" +
-                                              _("To continue, touch the Digital Bitbox's blinking light for 3 seconds.") + "\n\n" +
-                                              _("To cancel, briefly touch the blinking light or wait for the timeout."))
+                    handler.show_message(_("Signing transaction...") + "\n\n" +
+                                         _("To continue, touch the Digital Bitbox's blinking light for 3 seconds.") + "\n\n" +
+                                         _("To cancel, briefly touch the blinking light or wait for the timeout."))
 
                 # Send twice, first returns an echo for smart verification
                 reply = dbb_client.hid_send_encrypt(msg)
-                self.handler.finished()
+                handler.finished()
 
                 if 'error' in reply:
                     if reply["error"].get('code') in (600, 601):
@@ -741,13 +746,13 @@ class DigitalBitboxPlugin(HW_PluginBase):
         if not self.show_address_helper(wallet, address, keystore):
             return
         if type(wallet) is not Standard_Wallet:
-            keystore.handler.show_error(_('This function is only available for standard wallets when using {}.').format(self.device))
+            keystore.get_handler().show_error(_('This function is only available for standard wallets when using {}.').format(self.device))
             return
         if not self.is_mobile_paired():
-            keystore.handler.show_error(_('This function is only available after pairing your {} with a mobile device.').format(self.device))
+            keystore.get_handler().show_error(_('This function is only available after pairing your {} with a mobile device.').format(self.device))
             return
         if wallet.get_txin_type(address) != 'p2pkh':
-            keystore.handler.show_error(_('This function is only available for p2pkh keystores when using {}.').format(self.device))
+            keystore.get_handler().show_error(_('This function is only available for p2pkh keystores when using {}.').format(self.device))
             return
         change, index = wallet.get_address_index(address)
         keypath = '%s/%d/%d' % (keystore.get_derivation_prefix(), change, index)
@@ -756,7 +761,7 @@ class DigitalBitboxPlugin(HW_PluginBase):
             "type": 'p2pkh',
             "echo": xpub['echo'],
         }
-        self.comserver_post_notification(verify_request_payload, handler=keystore.handler)
+        self.comserver_post_notification(verify_request_payload, handler=keystore.get_handler())
 
     def wizard_entry_for_device(self, device_info: 'DeviceInfo', *, new_wallet=True) -> str:
         if new_wallet:

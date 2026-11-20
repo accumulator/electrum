@@ -10,7 +10,7 @@ from electrum.keystore import bip39_normalize_passphrase
 from electrum.bip32 import BIP32Node, convert_bip32_strpath_to_intpath
 from electrum.logging import Logger
 from electrum.plugin import runs_in_hwd_thread
-from electrum.hw_wallet.plugin import HardwareClientBase, HardwareHandlerBase
+from electrum.hw_wallet.plugin import HardwareClientBase
 
 if TYPE_CHECKING:
     from electrum.plugin import Device
@@ -20,8 +20,7 @@ DEPRECATION_WARNING_SHOWN = False
 
 
 class GuiMixin(object):
-    # Requires: self.proto, self.device
-    handler: Optional[HardwareHandlerBase]
+    # Requires: self.proto, self.device, self.get_handler()
 
     # ref: https://github.com/trezor/trezor-common/blob/44dfb07cfaafffada4b2ce0d15ba1d90d17cf35e/protob/types.proto#L89
     messages = {
@@ -53,7 +52,7 @@ class GuiMixin(object):
         message = self.msg
         if not message:
             message = self.messages.get(msg.code, self.messages['default'])
-        self.handler.show_message(message.format(self.device), self.cancel)
+        self.get_handler().show_message(message.format(self.device), self.cancel)
         return self.proto.ButtonAck()
 
     def callback_PinMatrixRequest(self, msg):
@@ -66,9 +65,10 @@ class GuiMixin(object):
         else:
             msg = _("Enter your current {} PIN:")
             show_strength = False
-        pin = self.handler.get_pin(msg.format(self.device), show_strength=show_strength)
+        handler = self.get_handler()
+        pin = handler.get_pin(msg.format(self.device), show_strength=show_strength)
         if len(pin) > 9:
-            self.handler.show_error(_('The PIN cannot be longer than 9 characters.'))
+            handler.show_error(_('The PIN cannot be longer than 9 characters.'))
             pin = ''  # to cancel below
         if not pin:
             return self.proto.Cancel()
@@ -85,7 +85,8 @@ class GuiMixin(object):
                     "access the bitcoins in the wallet.").format(self.device)
         else:
             msg = _("Enter the passphrase to unlock this wallet:")
-        passphrase = self.handler.get_passphrase(msg, self.creating_wallet)
+        handler = self.get_handler()
+        passphrase = handler.get_passphrase(msg, self.creating_wallet)
         if passphrase is None:
             return self.proto.Cancel()
         passphrase = bip39_normalize_passphrase(passphrase)
@@ -93,7 +94,7 @@ class GuiMixin(object):
         ack = self.proto.PassphraseAck(passphrase=passphrase)
         length = len(ack.passphrase)
         if length > 50:
-            self.handler.show_error(_("Too long passphrase ({} > 50 chars).").format(length))
+            handler.show_error(_("Too long passphrase ({} > 50 chars).").format(length))
             return self.proto.Cancel()
         return ack
 
@@ -104,16 +105,16 @@ class GuiMixin(object):
         self.step += 1
         msg = _("Step {}/24.  Enter seed word as explained on "
                 "your {}:").format(self.step, self.device)
-        word = self.handler.get_word(msg)
+        word = self.get_handler().get_word(msg)
         # Unfortunately the device can't handle self.proto.Cancel()
         return self.proto.WordAck(word=word)
 
 
 class SafeTClientBase(HardwareClientBase, GuiMixin, Logger):
 
-    def __init__(self, device_descriptor: 'Device', handler, plugin, proto):
+    def __init__(self, device_descriptor: 'Device', plugin, proto):
         assert hasattr(self, 'tx_api')  # ProtocolMixin already constructed?
-        HardwareClientBase.__init__(self, plugin=plugin, device_descriptor=device_descriptor, handler=handler)
+        HardwareClientBase.__init__(self, plugin=plugin, device_descriptor=device_descriptor)
         self.proto = proto
         self.device = plugin.device
         self.tx_api = plugin
@@ -188,9 +189,10 @@ class SafeTClientBase(HardwareClientBase, GuiMixin, Logger):
         self.logger.warning(deprecation_warning.replace("\n", " "))
 
         global DEPRECATION_WARNING_SHOWN
-        if self.handler and not DEPRECATION_WARNING_SHOWN:
+        handler = self.get_handler()
+        if handler and not DEPRECATION_WARNING_SHOWN:
             DEPRECATION_WARNING_SHOWN = True
-            self.handler.show_warning(deprecation_warning, blocking=True)
+            handler.show_warning(deprecation_warning, blocking=True)
 
         return BIP32Node(xtype=xtype,
                          eckey=ecc.ECPubkey(node.public_key),
@@ -265,14 +267,15 @@ class SafeTClientBase(HardwareClientBase, GuiMixin, Logger):
         '''Wrap methods to clear any message box they opened.'''
 
         def wrapped(self, *args, **kwargs):
-            try:
-                self.prevent_timeouts()
-                return func(self, *args, **kwargs)
-            finally:
-                self.used()
-                self.handler.finished()
-                self.creating_wallet = False
-                self.msg = None
+            with self.fixed_handler():
+                try:
+                    self.prevent_timeouts()
+                    return func(self, *args, **kwargs)
+                finally:
+                    self.used()
+                    self.get_handler().finished()
+                    self.creating_wallet = False
+                    self.msg = None
 
         return wrapped
 

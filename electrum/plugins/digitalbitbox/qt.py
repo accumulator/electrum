@@ -79,9 +79,7 @@ class WCDigitalBitboxScriptAndDerivation(WCScriptAndDerivation):
         current_cosigner = self.wizard.current_cosigner(self.wizard_data)
         device_id = current_cosigner['hardware_uid']
         self.client = self.wizard.plugins.device_manager.client_by_id(device_id, scan_now=False)
-        plugin = self.client.plugin
-        if not self.client.handler:
-            self.client.handler = plugin.create_handler(self.wizard)
+        self.wizard.claim_hw_client(self.client)
         self.client.setupRunning = True
         self.check_device()
 
