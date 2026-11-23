@@ -12,7 +12,7 @@ from electrum.transaction import PartialTransaction, Transaction
 from electrum.wallet import Multisig_Wallet
 from electrum.util import UserFacingException
 from electrum.logging import get_logger
-from electrum.plugin import runs_in_hwd_thread, Device
+from electrum.plugin import runs_in_hwd_thread, Device, DeviceTransport
 from electrum.network import Network
 
 from electrum.hw_wallet import HW_PluginBase, HardwareClientBase
@@ -329,30 +329,38 @@ class JadePlugin(HW_PluginBase):
             if device_product_key in self.DEVICE_IDS:
                 device = Device(path=devinfo.device,
                                 interface_number=-1,
-                                id_=devinfo.serial_number,
+                                # the port path too, as the serial number can be missing (e.g. CH340)
+                                id_=f"{devinfo.device},{devinfo.serial_number or ''}",
                                 product_key=device_product_key,
                                 usage_page=-1,
-                                transport_ui_string=devinfo.device)
+                                transport_ui_string=devinfo.device,
+                                transport=DeviceTransport.USB_SERIAL)
                 devices.append(device)
+        return devices
 
+    def enumerate_simulator(self):
         # Maybe look for Jade Qemu simulator if the vars are set (experimental)
-        if self.SIMULATOR_PATH is not None and self.SIMULATOR_TEST_SEED is not None:
-            try:
-                # If we can connect to a simulator and poke a seed in, add that too
-                device = Device(path=self.SIMULATOR_PATH,
-                                interface_number=-1,
-                                id_='Jade Qemu Simulator',
-                                product_key=self.DEVICE_IDS[0],
-                                usage_page=-1,
-                                transport_ui_string='simulator')
-                client = Jade_Client(device, plugin=self)
-                if client.jade.set_seed(self.SIMULATOR_TEST_SEED):
-                    devices.append(device)
-                client.close()
-            except Exception as e:
-                # If we get any sort of error do not add the simulator
-                _logger.debug("Failed to connect to Jade simulator at {}".format(self.SIMULATOR_PATH))
-                _logger.debug(e)
+        if self.SIMULATOR_PATH is None or self.SIMULATOR_TEST_SEED is None:
+            return []
+
+        devices = []
+        try:
+            # If we can connect to a simulator and poke a seed in, add that too
+            device = Device(path=self.SIMULATOR_PATH,
+                            interface_number=-1,
+                            id_='Jade Qemu Simulator',
+                            product_key=self.DEVICE_IDS[0],
+                            usage_page=-1,
+                            transport_ui_string='simulator',
+                            transport=DeviceTransport.TCP)
+            client = Jade_Client(device, plugin=self)
+            if client.jade.set_seed(self.SIMULATOR_TEST_SEED):
+                devices.append(device)
+            client.close()
+        except Exception as e:
+            # If we get any sort of error do not add the simulator
+            _logger.debug("Failed to connect to Jade simulator at {}".format(self.SIMULATOR_PATH))
+            _logger.debug(e)
 
         return devices
 
@@ -365,6 +373,8 @@ class JadePlugin(HW_PluginBase):
 
         # Register our own serial/com port scanning function
         self.device_manager().register_enumerate_func(self.enumerate_serial)
+        # Register our simulator
+        self.device_manager().register_enumerate_func(self.enumerate_simulator)
 
     def get_library_version(self):
         try:
