@@ -4,6 +4,7 @@
 #
 import os
 import time
+from functools import wraps, partial
 from typing import TYPE_CHECKING, Optional
 import struct
 
@@ -63,27 +64,40 @@ except ImportError as e:
 CKCC_SIMULATED_PID = CKCC_PID ^ 0x55aa
 
 
+def with_paired_device(func=None, do_pair: bool = True):
+    """decorator for Client methods, check that the device is connected before communicating with it,
+       optionally connecting it (see CKCCClient.pairing_dialog)."""
+    if func is None:
+        return partial(with_paired_device, do_pair=do_pair)
+
+    @wraps(func)
+    def wrapper(self: 'CKCCClient', *args, **kwargs):
+        if self.dev is None:
+            if do_pair:
+                _logger.info(f'{func.__qualname__}: pairing device')
+                self.pairing_dialog()
+            if self.dev is None:
+                _logger.error(f'{func.__qualname__}: error: device not paired')
+                raise ColdcardNotPaired(_("The Coldcard is not connected. Please reconnect it and try again."))
+        return func(self, *args, **kwargs)
+    return wrapper
+
+
+class ColdcardNotPaired(UserFacingException):
+    pass
+
+
 class CKCCClient(HardwareClientBase):
     def __init__(self, plugin, device: 'Device', *, is_simulator=False):
         HardwareClientBase.__init__(self, plugin=plugin, device_descriptor=device)
-        dev_path = device.path
         self.device = plugin.device
+        self._is_simulator = is_simulator
 
         # if we know what the (xfp, xpub) "should be" then track it here
         self._expected_device = None
 
-        if is_simulator:
-            self.dev = ElectrumColdcardDevice(dev_path, encrypt=True)
-        else:
-            # open the real HID device
-            hd = hid.device(path=dev_path)
-            try:
-                hd.open_path(dev_path)
-            except OSError:
-                _logger.error('cannot open hid path. Did you forget to configure udev rules?')
-                raise
-
-            self.dev = ElectrumColdcardDevice(dev=hd, encrypt=True)
+        # not connected yet: pairing_dialog connects when the device is first used
+        self.dev = None  # type: Optional[ElectrumColdcardDevice]
 
         # NOTE: MiTM test is delayed until we have a hint as to what XPUB we
         # should expect. It's also kinda slow.
@@ -91,17 +105,52 @@ class CKCCClient(HardwareClientBase):
     def device_model_name(self) -> Optional[str]:
         return 'Coldcard'
 
-    def get_soft_device_id(self) -> Optional[str]:
+    def is_paired(self) -> bool:
+        return self.dev is not None
+
+    @runs_in_hwd_thread
+    def pairing_dialog(self):
+        # Connect: open the device, a real one through the handler (on Android, that asks the user
+        # for permission), and set up the encrypted session.
+        if self.dev is not None:
+            return
+        # a new session has to be checked for MiTM again, see verify_connection
+        self._expected_device = None
+        if self._is_simulator:
+            self.dev = ElectrumColdcardDevice(self.device_descriptor.path, encrypt=True)
+            return
+        handler = self.get_handler()
+        if handler is None:
+            _logger.error('cannot open the device without a handler')
+            return
         try:
-            return super().get_soft_device_id()
+            hd = handler.open_hid_device(self.device_descriptor)
+        except OSError:
+            _logger.error('cannot open hid path. Did you forget to configure udev rules?')
+            raise
+        try:
+            self.dev = ElectrumColdcardDevice(dev=hd, encrypt=True)
+        except BaseException:
+            hd.close()
+            raise
+
+    def get_soft_device_id(self, *, avoid_pairing: bool = False) -> Optional[str]:
+        if not self.is_paired() and (avoid_pairing or self.get_handler() is None):
+            # Can't connect without the handler. This happens when listing the devices.
+            return None
+        try:
+            return self.request_root_fingerprint_from_device()
         except CCProtoError:
             return None
 
     def __repr__(self):
+        if not self.is_paired():
+            return '<CKCCClient: not paired>'
         return '<CKCCClient: xfp=%s label=%r>' % (xfp2str(self.dev.master_fingerprint),
-                                                        self.label())
+                                                        self.label(avoid_pairing=True))
 
     @runs_in_hwd_thread
+    @with_paired_device(do_pair=False)
     def verify_connection(self, expected_xfp: int, expected_xpub: str):
         ex = (expected_xfp, expected_xpub)
 
@@ -131,19 +180,29 @@ class CKCCClient(HardwareClientBase):
         _logger.info("Successfully verified against MiTM")
 
     def is_pairable(self):
+        if not self.is_paired():
+            return True  # can't tell before connecting
         # can't do anything w/ devices that aren't setup (this code not normally reachable)
         return bool(self.dev.master_xpub)
 
     @runs_in_hwd_thread
     def close(self):
         # close the HID device (so can be reused)
-        self.dev.close()
-        self.dev = None
+        if self.dev is not None:
+            self.dev.close()
+            self.dev = None
 
     def is_initialized(self):
+        if not self.is_paired():
+            return True  # can't tell before connecting, which listing the devices must not do
         return bool(self.dev.master_xpub)
 
-    def label(self):
+    def label(self, *, avoid_pairing: bool = False) -> Optional[str]:
+        if not self.is_paired():
+            if avoid_pairing or self.get_handler() is None:
+                # Can't connect without the handler. This happens when listing the devices.
+                return super().label()
+            self.pairing_dialog()
         # 'label' of this Coldcard. Warning: gets saved into wallet file, which might
         # not be encrypted, so better for privacy if based on xpub/fingerprint rather than
         # USB serial number.
@@ -157,6 +216,7 @@ class CKCCClient(HardwareClientBase):
 
         return lab
 
+    @with_paired_device
     def _get_ckcc_master_xpub_from_device(self):
         master_xpub = self.dev.master_xpub
         if master_xpub is not None:
@@ -171,6 +231,8 @@ class CKCCClient(HardwareClientBase):
 
     @runs_in_hwd_thread
     def has_usable_connection_with_device(self):
+        if not self.is_paired():
+            return True  # nothing to test before connecting, and testing must not connect
         # Do end-to-end ping test
         try:
             self.ping_check()
@@ -179,6 +241,7 @@ class CKCCClient(HardwareClientBase):
             return False
 
     @runs_in_hwd_thread
+    @with_paired_device
     def get_xpub(self, bip32_path, xtype):
         assert xtype in ColdcardPlugin.SUPPORTED_XTYPES
         _logger.info('Derive xtype = %r' % xtype)
@@ -195,6 +258,7 @@ class CKCCClient(HardwareClientBase):
         return xpub
 
     @runs_in_hwd_thread
+    @with_paired_device
     def ping_check(self):
         # check connection is working
         assert self.dev.session_key, 'not encrypted?'
@@ -206,31 +270,37 @@ class CKCCClient(HardwareClientBase):
             raise RuntimeError("Communication trouble with Coldcard")
 
     @runs_in_hwd_thread
+    @with_paired_device(do_pair=False)
     def show_address(self, path, addr_fmt):
         # prompt user w/ address, also returns it immediately.
         return self.dev.send_recv(CCProtocolPacker.show_address(path, addr_fmt), timeout=None)
 
     @runs_in_hwd_thread
+    @with_paired_device(do_pair=False)
     def show_p2sh_address(self, *args, **kws):
         # prompt user w/ p2sh address, also returns it immediately.
         return self.dev.send_recv(CCProtocolPacker.show_p2sh_address(*args, **kws), timeout=None)
 
     @runs_in_hwd_thread
+    @with_paired_device(do_pair=False)
     def get_version(self):
         # gives list of strings
         return self.dev.send_recv(CCProtocolPacker.version(), timeout=1000).split('\n')
 
     @runs_in_hwd_thread
+    @with_paired_device(do_pair=False)
     def sign_message_start(self, path, msg, addr_fmt):
         # this starts the UX experience.
         self.dev.send_recv(CCProtocolPacker.sign_message(msg, path, addr_fmt), timeout=None)
 
     @runs_in_hwd_thread
+    @with_paired_device(do_pair=False)
     def sign_message_poll(self):
         # poll device... if user has approved, will get tuple: (addr, sig) else None
         return self.dev.send_recv(CCProtocolPacker.get_signed_msg(), timeout=None)
 
     @runs_in_hwd_thread
+    @with_paired_device(do_pair=False)
     def sign_transaction_start(self, raw_psbt: bytes, *, finalize: bool = False):
         # Multiple steps to sign:
         # - upload binary
@@ -247,11 +317,13 @@ class CKCCClient(HardwareClientBase):
             raise ValueError(resp)
 
     @runs_in_hwd_thread
+    @with_paired_device(do_pair=False)
     def sign_transaction_poll(self):
         # poll device... if user has approved, will get tuple: (length, checksum) else None
         return self.dev.send_recv(CCProtocolPacker.get_signed_txn(), timeout=None)
 
     @runs_in_hwd_thread
+    @with_paired_device(do_pair=False)
     def download_file(self, length, checksum, file_number=1):
         # get a file
         return self.dev.download_file(length, checksum, file_number=file_number)
@@ -541,16 +613,10 @@ class ColdcardPlugin(HW_PluginBase):
 
     @runs_in_hwd_thread
     def create_client(self, device_descriptor: 'Device', handler):
-        # We are given a HID device, or at least some details about it.
-        # Not sure why not we aren't just given a HID library handle, but
-        # the 'path' is unabiguous, so we'll use that.
-        try:
-            rv = CKCCClient(self, device_descriptor,
-                            is_simulator=(device_descriptor.product_key[1] == CKCC_SIMULATED_PID))
-            return rv
-        except Exception as e:
-            self.logger.exception('late failure connecting to device?')
-            return None
+        # Doesn't connect: the client opens the device through its handler when the
+        # device is first used, see CKCCClient.pairing_dialog.
+        return CKCCClient(self, device_descriptor,
+                          is_simulator=(device_descriptor.product_key[1] == CKCC_SIMULATED_PID))
 
     @runs_in_hwd_thread
     def get_client(self, keystore, force_pair=True, *,

@@ -164,6 +164,8 @@ class CKCCSettingsDialog(WindowModalDialog):
             client = devmgr.client_by_id(device_id)
             if not client:
                 raise RuntimeError("Device not connected")
+            client.set_keystore(keystore)  # so that connecting goes through the keystore's handler
+            client.ping_check()  # connects the device, if it isn't yet
             return client
 
         body = QWidget()
