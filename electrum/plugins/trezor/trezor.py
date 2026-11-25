@@ -25,6 +25,7 @@ try:
     import trezorlib
     import trezorlib.transport
     from trezorlib.transport.bridge import BridgeTransport, call_bridge
+    from trezorlib.transport.hid import HidTransport
 
     from .clientbase import TrezorClientBase, RecoveryDeviceInputMethod
 
@@ -173,6 +174,9 @@ class TrezorPlugin(HW_PluginBase):
         self.libraries_available = self.check_libraries_available()
         if not self.libraries_available:
             return
+        # Trezors use WebUSB; only Trezor One firmware older than 1.7.0 (2018) uses HID.
+        # Don't look for devices over HID.
+        HidTransport.ENABLED = False
         self.device_manager().register_enumerate_func(self.enumerate)
         self._is_bridge_available = None
 
