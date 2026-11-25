@@ -14,7 +14,9 @@ from electrum.hw_wallet.qt import QtHandlerBase, QtPluginBase
 from electrum.hw_wallet.plugin import only_hook_if_libraries_available
 
 from electrum.gui.qt.wizard.wallet import WCScriptAndDerivation, WCHWXPub, WCHWUninitialized, WCHWUnlock
-from electrum.gui.qt.util import WindowModalDialog, CloseButton, getOpenFileName, getSaveFileName, RichLabel
+from electrum.gui.qt.util import (
+    WindowModalDialog, CloseButton, getOpenFileName, getSaveFileName, RichLabel, internal_plugin_icon_path
+)
 from electrum.gui.qt.main_window import ElectrumWindow
 
 from .coldcard import ColdcardPlugin, xfp2str
@@ -125,10 +127,22 @@ class Plugin(ColdcardPlugin, QtPluginBase):
     def extend_wizard(self, wizard: 'QENewWalletWizard'):
         super().extend_wizard(wizard)
         views = {
-            'coldcard_start': {'gui': WCScriptAndDerivation},
-            'coldcard_xpub': {'gui': WCHWXPub},
-            'coldcard_not_initialized': {'gui': WCHWUninitialized},
-            'coldcard_unlock': {'gui': WCHWUnlock}
+            'coldcard_start': {
+                'gui': WCScriptAndDerivation,
+                'params': {'icon': internal_plugin_icon_path(self.name, 'coldcard.png')},
+            },
+            'coldcard_xpub': {
+                'gui': WCHWXPub,
+                'params': {'icon': internal_plugin_icon_path(self.name, 'coldcard.png')},
+            },
+            'coldcard_not_initialized': {
+                'gui': WCHWUninitialized,
+                'params': {'icon': internal_plugin_icon_path(self.name, 'coldcard.png')},
+            },
+            'coldcard_unlock': {
+                'gui': WCHWUnlock,
+                'params': {'icon': internal_plugin_icon_path(self.name, 'coldcard.png')},
+            }
         }
         wizard.navmap_merge(views)
 

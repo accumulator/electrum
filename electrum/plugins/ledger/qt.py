@@ -12,6 +12,7 @@ from electrum.hw_wallet.plugin import only_hook_if_libraries_available
 
 from .ledger import LedgerPlugin, Ledger_Client
 from electrum.gui.qt.wizard.wallet import WCScriptAndDerivation, WCHWUninitialized, WCHWUnlock, WCHWXPub
+from electrum.gui.qt.util import internal_plugin_icon_path
 
 if TYPE_CHECKING:
     from electrum.gui.qt.wizard.wallet import QENewWalletWizard
@@ -41,10 +42,22 @@ class Plugin(LedgerPlugin, QtPluginBase):
     def extend_wizard(self, wizard: 'QENewWalletWizard'):
         super().extend_wizard(wizard)
         views = {
-            'ledger_start': {'gui': WCScriptAndDerivation},
-            'ledger_xpub': {'gui': WCHWXPub},
-            'ledger_not_initialized': {'gui': WCHWUninitialized},
-            'ledger_unlock': {'gui': WCHWUnlock}
+            'ledger_start': {
+                'gui': WCScriptAndDerivation,
+                'params': {'icon': internal_plugin_icon_path(self.name, 'ledger.png')},
+            },
+            'ledger_xpub': {
+                'gui': WCHWXPub,
+                'params': {'icon': internal_plugin_icon_path(self.name, 'ledger.png')},
+            },
+            'ledger_not_initialized': {
+                'gui': WCHWUninitialized,
+                'params': {'icon': internal_plugin_icon_path(self.name, 'ledger.png')},
+            },
+            'ledger_unlock': {
+                'gui': WCHWUnlock,
+                'params': {'icon': internal_plugin_icon_path(self.name, 'ledger.png')},
+            }
         }
         wizard.navmap_merge(views)
 

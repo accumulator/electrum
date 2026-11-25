@@ -14,7 +14,7 @@ from electrum.hw_wallet.qt import QtHandlerBase, QtPluginBase
 from electrum.hw_wallet.plugin import only_hook_if_libraries_available, OperationCancelled
 
 from electrum.gui.qt.wizard.wallet import WCScriptAndDerivation, WCHWUnlock, WCHWUninitialized, WCHWXPub
-from electrum.gui.qt.util import WindowModalDialog, OkButton, ButtonsTextEdit, read_QIcon
+from electrum.gui.qt.util import WindowModalDialog, OkButton, ButtonsTextEdit, read_QIcon, internal_plugin_icon_path
 
 if TYPE_CHECKING:
     from electrum.gui.qt.wizard.wallet import QENewWalletWizard
@@ -55,10 +55,22 @@ class Plugin(BitBox02Plugin, QtPluginBase):
     def extend_wizard(self, wizard: 'QENewWalletWizard'):
         super().extend_wizard(wizard)
         views = {
-            'bitbox02_start': {'gui': WCBitbox02ScriptAndDerivation},
-            'bitbox02_xpub': {'gui': WCHWXPub},
-            'bitbox02_not_initialized': {'gui': WCHWUninitialized},
-            'bitbox02_unlock': {'gui': WCHWUnlock}
+            'bitbox02_start': {
+                'gui': WCBitbox02ScriptAndDerivation,
+                'params': {'icon': internal_plugin_icon_path(self.name, 'bitbox02.png')},
+            },
+            'bitbox02_xpub': {
+                'gui': WCHWXPub,
+                'params': {'icon': internal_plugin_icon_path(self.name, 'bitbox02.png')},
+            },
+            'bitbox02_not_initialized': {
+                'gui': WCHWUninitialized,
+                'params': {'icon': internal_plugin_icon_path(self.name, 'bitbox02.png')},
+            },
+            'bitbox02_unlock': {
+                'gui': WCHWUnlock,
+                'params': {'icon': internal_plugin_icon_path(self.name, 'bitbox02.png')},
+            }
         }
         wizard.navmap_merge(views)
 

@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (QVBoxLayout, QLabel, QGridLayout, QPushButton,
                              QMessageBox, QSlider, QTabWidget)
 
 from electrum.gui.qt.util import (WindowModalDialog, WWLabel, Buttons, CancelButton,
-                                  OkButton, CloseButton, ChoiceWidget)
+                                  OkButton, CloseButton, ChoiceWidget, internal_plugin_icon_path)
 from electrum.i18n import _
 from electrum.plugin import hook
 from electrum.logging import Logger
@@ -324,12 +324,30 @@ class Plugin(KeepKeyPlugin, QtPlugin):
     def extend_wizard(self, wizard: 'QENewWalletWizard'):
         super().extend_wizard(wizard)
         views = {
-            'keepkey_start': {'gui': WCScriptAndDerivation},
-            'keepkey_xpub': {'gui': WCHWXPub},
-            'keepkey_not_initialized': {'gui': WCKeepkeyInitMethod},
-            'keepkey_choose_new_recover': {'gui': WCKeepkeyInitParams},
-            'keepkey_do_init': {'gui': WCKeepkeyInit},
-            'keepkey_unlock': {'gui': WCHWUnlock}
+            'keepkey_start': {
+                'gui': WCScriptAndDerivation,
+                'params': {'icon': internal_plugin_icon_path(self.name, 'keepkey.png')},
+            },
+            'keepkey_xpub': {
+                'gui': WCHWXPub,
+                'params': {'icon': internal_plugin_icon_path(self.name, 'keepkey.png')},
+            },
+            'keepkey_not_initialized': {
+                'gui': WCKeepkeyInitMethod,
+                'params': {'icon': internal_plugin_icon_path(self.name, 'keepkey.png')},
+            },
+            'keepkey_choose_new_recover': {
+                'gui': WCKeepkeyInitParams,
+                'params': {'icon': internal_plugin_icon_path(self.name, 'keepkey.png')},
+            },
+            'keepkey_do_init': {
+                'gui': WCKeepkeyInit,
+                'params': {'icon': internal_plugin_icon_path(self.name, 'keepkey.png')},
+            },
+            'keepkey_unlock': {
+                'gui': WCHWUnlock,
+                'params': {'icon': internal_plugin_icon_path(self.name, 'keepkey.png')},
+            }
         }
         wizard.navmap_merge(views)
 

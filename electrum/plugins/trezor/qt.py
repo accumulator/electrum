@@ -19,7 +19,8 @@ from electrum.hw_wallet.trezor_qt_pinmatrix import PinMatrixWidget
 from electrum.hw_wallet.plugin import only_hook_if_libraries_available, OutdatedHwFirmwareException
 
 from electrum.gui.qt.util import (WindowModalDialog, WWLabel, Buttons, CancelButton,
-                                  OkButton, CloseButton, PasswordLineEdit, getOpenFileName, ChoiceWidget)
+                                  OkButton, CloseButton, PasswordLineEdit, getOpenFileName, ChoiceWidget,
+                                  internal_plugin_icon_path)
 from electrum.gui.qt.wizard.wallet import WCScriptAndDerivation, WCHWUnlock, WCHWXPub, WalletWizardComponent
 
 from .trezor import (TrezorPlugin, TIM_NEW, TIM_RECOVER, TrezorInitSettings,
@@ -467,13 +468,34 @@ class Plugin(TrezorPlugin, QtPlugin):
     def extend_wizard(self, wizard: 'QENewWalletWizard'):
         super().extend_wizard(wizard)
         views = {
-            'trezor_start': {'gui': WCScriptAndDerivation},
-            'trezor_xpub': {'gui': WCTrezorXPub},
-            'trezor_not_initialized': {'gui': WCTrezorInitMethod},
-            'trezor_choose_new_recover': {'gui': WCTrezorInitParams},
-            'trezor_do_init': {'gui': WCTrezorInit},
-            'trezor_unlock': {'gui': WCHWUnlock},
-            'trezor_unpaired': {'gui': WCTrezorPair},
+            'trezor_start': {
+                'gui': WCScriptAndDerivation,
+                'params': {'icon': internal_plugin_icon_path(self.name, 'trezor.png')},
+            },
+            'trezor_xpub': {
+                'gui': WCTrezorXPub,
+                'params': {'icon': internal_plugin_icon_path(self.name, 'trezor.png')},
+            },
+            'trezor_not_initialized': {
+                'gui': WCTrezorInitMethod,
+                'params': {'icon': internal_plugin_icon_path(self.name, 'trezor.png')},
+            },
+            'trezor_choose_new_recover': {
+                'gui': WCTrezorInitParams,
+                'params': {'icon': internal_plugin_icon_path(self.name, 'trezor.png')},
+            },
+            'trezor_do_init': {
+                'gui': WCTrezorInit,
+                'params': {'icon': internal_plugin_icon_path(self.name, 'trezor.png')},
+            },
+            'trezor_unlock': {
+                'gui': WCHWUnlock,
+                'params': {'icon': internal_plugin_icon_path(self.name, 'trezor.png')},
+            },
+            'trezor_unpaired': {
+                'gui': WCTrezorPair,
+                'params': {'icon': internal_plugin_icon_path(self.name, 'trezor.png')},
+            },
         }
         wizard.navmap_merge(views)
 

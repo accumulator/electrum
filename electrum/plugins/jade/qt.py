@@ -11,6 +11,7 @@ from electrum.hw_wallet.qt import QtHandlerBase, QtPluginBase
 from electrum.hw_wallet import plugin
 from electrum.hw_wallet.plugin import only_hook_if_libraries_available
 from electrum.gui.qt.wizard.wallet import WCScriptAndDerivation, WCHWUnlock, WCHWXPub, WCHWUninitialized
+from electrum.gui.qt.util import internal_plugin_icon_path
 
 from .jade import JadePlugin
 
@@ -42,10 +43,22 @@ class Plugin(JadePlugin, QtPluginBase):
     def extend_wizard(self, wizard: 'QENewWalletWizard'):
         super().extend_wizard(wizard)
         views = {
-            'jade_start': {'gui': WCScriptAndDerivation},
-            'jade_xpub': {'gui': WCHWXPub},
-            'jade_not_initialized': {'gui': WCHWUninitialized},
-            'jade_unlock': {'gui': WCHWUnlock}
+            'jade_start': {
+                'gui': WCScriptAndDerivation,
+                'params': {'icon': internal_plugin_icon_path(self.name, 'jade.png')},
+            },
+            'jade_xpub': {
+                'gui': WCHWXPub,
+                'params': {'icon': internal_plugin_icon_path(self.name, 'jade.png')},
+            },
+            'jade_not_initialized': {
+                'gui': WCHWUninitialized,
+                'params': {'icon': internal_plugin_icon_path(self.name, 'jade.png')},
+            },
+            'jade_unlock': {
+                'gui': WCHWUnlock,
+                'params': {'icon': internal_plugin_icon_path(self.name, 'jade.png')},
+            }
         }
         wizard.navmap_merge(views)
 
