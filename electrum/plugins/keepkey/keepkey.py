@@ -60,11 +60,11 @@ class KeepKeyPlugin(HW_PluginBase):
     #
     #  class-static variables: client_class, firmware_URL, handler_class,
     #     libraries_available, libraries_URL, minimum_firmware,
-    #     wallet_class, ckd_public, types, HidTransport
+    #     wallet_class, ckd_public, types
 
     firmware_URL = 'https://www.keepkey.com'
     libraries_URL = 'https://github.com/keepkey/python-keepkey'
-    minimum_firmware = (1, 0, 0)
+    minimum_firmware = (6, 0, 0)
     keystore_class = KeepKey_KeyStore
     SUPPORTED_XTYPES = ('standard', 'p2wpkh-p2sh', 'p2wpkh', 'p2wsh-p2sh', 'p2wsh')
 
@@ -79,15 +79,11 @@ class KeepKeyPlugin(HW_PluginBase):
         try:
             from . import client
             from .keepkeylib import keepkeylib
-            from .keepkeylib.keepkeylib import ckd_public, transport_hid, transport_webusb
+            from .keepkeylib.keepkeylib import ckd_public, transport_webusb
             self.client_class = client.KeepKeyClient
             self.ckd_public = keepkeylib.ckd_public
             self.types = keepkeylib.client.types
-            self.DEVICE_IDS = (keepkeylib.transport_hid.DEVICE_IDS +
-                               keepkeylib.transport_webusb.DEVICE_IDS)
-            # only "register" hid device id:
-            self.device_manager().register_devices(keepkeylib.transport_hid.DEVICE_IDS, plugin=self)
-            # for webusb transport, use custom enumerate function:
+            self.DEVICE_IDS = keepkeylib.transport_webusb.DEVICE_IDS
             self.device_manager().register_enumerate_func(self.enumerate)
             self.libraries_available = True
         except ImportError:
@@ -113,32 +109,11 @@ class KeepKeyPlugin(HW_PluginBase):
         return ":".join(str(x) for x in ["%03i" % (dev.getBusNumber(),)] + dev.getPortNumberList())
 
     @runs_in_hwd_thread
-    def hid_transport(self, pair):
-        from .keepkeylib.keepkeylib.transport_hid import HidTransport
-        return HidTransport(pair)
-
-    @runs_in_hwd_thread
     def webusb_transport(self, device):
         from .keepkeylib.keepkeylib.transport_webusb import WebUsbTransport
         for dev in WebUsbTransport.enumerate():
             if device.path == self._dev_to_str(dev):
                 return WebUsbTransport(dev)
-
-    @runs_in_hwd_thread
-    def _try_hid(self, device):
-        self.logger.info("Trying to connect over USB...")
-        if device.interface_number == 1:
-            pair = [None, device.path]
-        else:
-            pair = [device.path, None]
-
-        try:
-            return self.hid_transport(pair)
-        except BaseException as e:
-            # see fdb810ba622dc7dbe1259cbafb5b28e19d2ab114
-            # raise
-            self.logger.info(f"cannot connect at {device.path} {e}")
-            return None
 
     @runs_in_hwd_thread
     def _try_webusb(self, device):
@@ -151,11 +126,7 @@ class KeepKeyPlugin(HW_PluginBase):
 
     @runs_in_hwd_thread
     def create_client(self, device_descriptor: 'Device', handler):
-        if device_descriptor.product_key[1] == 2:
-            transport = self._try_webusb(device_descriptor)
-        else:
-            transport = self._try_hid(device_descriptor)
-
+        transport = self._try_webusb(device_descriptor)
         if not transport:
             self.logger.info("cannot connect to device")
             return
@@ -279,9 +250,6 @@ class KeepKeyPlugin(HW_PluginBase):
         if not self.show_address_helper(wallet, address, keystore):
             return
         client = self.get_client(keystore)
-        if not client.atleast_version(1, 3):
-            keystore.get_handler().show_error(_("Your device firmware is too old"))
-            return
         deriv_suffix = wallet.get_address_index(address)
         derivation = keystore.get_derivation_prefix()
         address_path = "%s/%d/%d"%(derivation, *deriv_suffix)
