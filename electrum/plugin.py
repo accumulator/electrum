@@ -1616,6 +1616,23 @@ class DeviceMgr(ThreadJob):
                 if info.soft_device_id == keystore.soft_device_id:
                     self.logger.debug(f"select_device. auto-selected(1) {plugin.device}: soft_device_id matched")
                     return info
+            # devices are listed without connecting to them, so the ones not connected yet have no id:
+            # connect those that need no user interaction for it, and match their id
+            for info in infos:
+                client = self._client_by_id(info.device.id_)
+                if (info.soft_device_id is not None or client is None or client.is_paired()
+                        or not client.connects_without_interaction):
+                    continue
+                client.set_keystore(keystore)  # so that it connects through the keystore's handler
+                try:
+                    soft_device_id = client.get_soft_device_id()
+                except Exception as e:
+                    self.logger.info(f"select_device. cannot connect {plugin.device} {info.device.id_}: {e!r}")
+                    continue
+                if soft_device_id == keystore.soft_device_id:
+                    self.logger.debug(f"select_device. auto-selected(1) {plugin.device}: soft_device_id matched "
+                                      f"once connected")
+                    return info
         # method 2: select device by label
         #           but only if not a placeholder label and only if there is no collision
         device_labels = [info.label for info in infos]

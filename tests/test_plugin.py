@@ -12,7 +12,7 @@ from electrum import util
 from electrum import plugin as plugin_module
 from electrum.crypto import sha256
 from electrum.plugin import (Plugins, IncorrectPluginHash, PluginMetadata, DeviceMgr, _hwd_comms_executor,
-                             runs_in_hwd_thread, run_in_hwd_thread, DeviceUnpairableError)
+                             runs_in_hwd_thread, run_in_hwd_thread, DeviceUnpairableError, CannotAutoSelectDevice)
 from electrum.hw_wallet import HW_PluginBase, HardwareClientBase, constant_handler_delegate
 from electrum.keystore import Hardware_KeyStore
 from electrum.zip_importer import MemoryZipImporter
@@ -178,6 +178,7 @@ class FakeHandler:
 class FakePlugin:
     name = 'fake'
     device = 'Fake'
+    libraries_available = True
     close_keystore = HW_PluginBase.close_keystore
 
     def __init__(self, devmgr: DeviceMgr):
@@ -185,6 +186,9 @@ class FakePlugin:
 
     def device_manager(self) -> DeviceMgr:
         return self._devmgr
+
+    def can_recognize_device(self, device) -> bool:
+        return True
 
 
 class FakeThread:
@@ -221,6 +225,30 @@ class FakeClient(HardwareClientBase):
     @runs_in_hwd_thread  # like the real clients
     def close(self):
         self.closed_on = threading.current_thread().name
+
+
+class FakeLazyClient(FakeClient):
+    """Like a Ledger or Coldcard client: doesn't connect when it is created, and connecting needs no user
+    interaction. The device reports device_soft_device_id once connected."""
+    connects_without_interaction = True
+
+    def __init__(self, plugin: FakePlugin, id_: str, device_soft_device_id: str, *, connect_error: Exception = None):
+        FakeClient.__init__(self, plugin, id_)
+        self.device_soft_device_id = device_soft_device_id
+        self.connect_error = connect_error
+        self.connected = False
+
+    def is_paired(self):
+        return self.connected
+
+    def get_soft_device_id(self, *, avoid_pairing: bool = False):
+        if not self.connected:
+            if avoid_pairing or self.get_handler() is None:
+                return None
+            if self.connect_error is not None:
+                raise self.connect_error
+            self.connected = True
+        return self.device_soft_device_id
 
 
 class FakeKeystore(Hardware_KeyStore):
@@ -589,6 +617,55 @@ class DeviceMgrTestCase(ElectrumTestCase):
         self._force_pair(self.keystore, XPUB_A)
         self.assertIsNone(self.devmgr.get_bound_client(closed))
         self.assertEqual([True, False], closed_handler.statuses)
+
+    # --- selecting a device ---
+
+    def _add_lazy_client(self, id_: str, device_soft_device_id: str, **kwargs) -> FakeLazyClient:
+        client = run_in_hwd_thread(lambda: FakeLazyClient(self.plugin, id_, device_soft_device_id, **kwargs))
+        self.devmgr._clients[client] = id_
+        return client
+
+    def _select(self, keystore: FakeKeystore, *ids: str):
+        devices = [SimpleNamespace(id_=id_) for id_ in ids]
+        return self.devmgr.select_device(self.plugin, keystore, devices, allow_user_interaction=False)
+
+    def test_select_device_connects_a_device_listed_without_id(self):
+        # e.g. a Ledger at wallet open: it was listed without connecting to it, so without the id the keystore saved
+        client = self._add_lazy_client('dev2', 'feed')
+        keystore = FakeKeystore(self.plugin, 'feed', self.handler)
+        self.assertEqual('dev2', self._select(keystore, 'dev2').device.id_)
+        self.assertTrue(client.is_paired())
+        self.assertIs(self.handler, client.get_handler())  # it connected through the keystore's handler
+
+    def test_select_device_connects_devices_until_the_id_matches(self):
+        other = self._add_lazy_client('dev2', 'beef')  # another device of the same type
+        self._add_lazy_client('dev3', 'feed')
+        keystore = FakeKeystore(self.plugin, 'feed', self.handler)
+        self.assertEqual('dev3', self._select(keystore, 'dev2', 'dev3').device.id_)
+        self.assertTrue(other.is_paired())
+
+    def test_select_device_skips_a_device_that_cannot_connect(self):
+        client = self._add_lazy_client('dev2', 'feed', connect_error=RuntimeError('locked'))
+        keystore = FakeKeystore(self.plugin, 'feed', self.handler)
+        with self.assertRaises(CannotAutoSelectDevice):
+            self._select(keystore, 'dev2')
+        self.assertFalse(client.is_paired())
+
+    def test_select_device_does_not_connect_a_device_that_needs_interaction(self):
+        # e.g. a BitBox02, which has to be unlocked and its pairing confirmed
+        client = self._add_lazy_client('dev2', 'feed')
+        client.connects_without_interaction = False
+        keystore = FakeKeystore(self.plugin, 'feed', self.handler)
+        with self.assertRaises(CannotAutoSelectDevice):
+            self._select(keystore, 'dev2')
+        self.assertFalse(client.is_paired())
+
+    def test_select_device_does_not_connect_for_a_keystore_without_id(self):
+        # nothing to match: the only device is selected as before, without connecting to it
+        client = self._add_lazy_client('dev2', 'feed')
+        keystore = FakeKeystore(self.plugin, None, self.handler)
+        self.assertEqual('dev2', self._select(keystore, 'dev2').device.id_)
+        self.assertFalse(client.is_paired())
 
     # --- closing ---
 

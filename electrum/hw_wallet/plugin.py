@@ -237,6 +237,10 @@ class HardwareClientBase(ABC):
     # Whether the client can serve several roots (passphrases) at the same time, e.g. with a session per
     # passphrase. If not, pairing it with one root unpairs the keystores of the others.
     concurrent_roots = False
+    # Whether connecting to the device needs no user interaction on it (e.g. no unlock or pairing confirmation).
+    # Such a client, if it doesn't connect when it is created, is connected by select_device to tell the
+    # devices apart by their soft device id.
+    connects_without_interaction = False
 
     def __init__(self, *, plugin: 'HW_PluginBase', device_descriptor: 'Device'):
         assert_runs_in_hwd_thread()

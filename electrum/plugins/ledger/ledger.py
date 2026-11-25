@@ -351,6 +351,7 @@ class LedgerNotPaired(UserFacingException):
 class Ledger_Client(HardwareClientBase):
     """Doesn't connect when it is created: pairing_dialog opens the device when it is first used, and
     picks the implementation that fits the version of the Bitcoin app."""
+    connects_without_interaction = True
 
     def __init__(self, *, plugin: 'LedgerPlugin', device_descriptor: 'Device'):
         HardwareClientBase.__init__(self, plugin=plugin, device_descriptor=device_descriptor)

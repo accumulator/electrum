@@ -88,6 +88,8 @@ class ColdcardNotPaired(UserFacingException):
 
 
 class CKCCClient(HardwareClientBase):
+    connects_without_interaction = True
+
     def __init__(self, plugin, device: 'Device', *, is_simulator=False):
         HardwareClientBase.__init__(self, plugin=plugin, device_descriptor=device)
         self.device = plugin.device
