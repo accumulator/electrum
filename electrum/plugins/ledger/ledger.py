@@ -3,6 +3,7 @@
 
 from abc import ABC, abstractmethod
 import base64
+from functools import partial, wraps
 import hashlib
 from typing import Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING, Union
 
@@ -26,6 +27,7 @@ from electrum.hw_wallet.plugin import is_any_tx_output_on_change_branch, validat
 from electrum.hw_wallet.plugin import HardwareClientDummy
 
 if TYPE_CHECKING:
+    from electrum.hw_wallet import HardwareHandlerBase
     from electrum.plugin import Device, DeviceInfo
     from electrum.wizard import NewWalletWizard
 
@@ -39,13 +41,28 @@ try:
     from ledger_bitcoin.key import KeyOriginInfo
     from ledgercomm.interfaces.hid_device import HID
 
+    # ledgercomm tolerates a missing hidapi, but the devices are opened with it
+    import hid  # noqa: F401
+
     # legacy imports
-    import hid
     from ledger_bitcoin.btchip.btchipComm import HIDDongleHIDAPI
     from ledger_bitcoin.btchip.btchip import btchip
     from ledger_bitcoin.btchip.btchipUtils import compress_public_key
     from ledger_bitcoin.btchip.bitcoinTransaction import bitcoinTransaction
     from ledger_bitcoin.btchip.btchipException import BTChipException
+
+    class _OpenedHID(HID):
+        """ledgercomm's HID interface on a hid device the handler has opened already."""
+        def __init__(self, hid_device):
+            super().__init__()
+            self.device = hid_device
+            self.device.set_nonblocking(True)
+
+        def open(self) -> None:
+            pass
+
+        def close(self) -> None:
+            self.device.close()
 
     LEDGER_BITCOIN = True
 except ImportError as e:
@@ -308,45 +325,176 @@ def get_chain() -> 'Chain':
         raise ValueError("Unsupported network")
 
 
-class Ledger_Client(HardwareClientBase, ABC):
+def with_paired_device(func=None, do_pair: bool = True):
+    """decorator for Ledger_Client methods, check that the device is connected before communicating with it,
+       optionally connecting it (see Ledger_Client.pairing_dialog)."""
+    if func is None:
+        return partial(with_paired_device, do_pair=do_pair)
+
+    @wraps(func)
+    def wrapper(self: 'Ledger_Client', *args, **kwargs):
+        if self.impl is None:
+            if do_pair:
+                _logger.info(f'{func.__qualname__}: pairing device')
+                self.pairing_dialog()
+            if self.impl is None:
+                _logger.error(f'{func.__qualname__}: error: device not paired')
+                raise LedgerNotPaired(_("The Ledger is not connected. Please reconnect it and try again."))
+        return func(self, *args, **kwargs)
+    return wrapper
+
+
+class LedgerNotPaired(UserFacingException):
+    pass
+
+
+class Ledger_Client(HardwareClientBase):
+    """Doesn't connect when it is created: pairing_dialog opens the device when it is first used, and
+    picks the implementation that fits the version of the Bitcoin app."""
+
+    def __init__(self, *, plugin: 'LedgerPlugin', device_descriptor: 'Device'):
+        HardwareClientBase.__init__(self, plugin=plugin, device_descriptor=device_descriptor)
+        # not connected yet: pairing_dialog connects when the device is first used
+        self.impl = None  # type: Optional[Ledger_ClientImpl]
+
+    def is_paired(self) -> bool:
+        return self.impl is not None
+
+    @runs_in_hwd_thread
+    def pairing_dialog(self):
+        # Connect: open the device through the handler (on Android, that asks the user for permission),
+        # and pick the implementation based on the version of the Bitcoin app.
+        if self.impl is not None:
+            return
+        handler = self.get_handler()
+        if handler is None:
+            _logger.error('cannot open the device without a handler')
+            return
+        hid_device = handler.open_hid_device(self.device_descriptor)
+        try:
+            transport = ledger_bitcoin.TransportClient('hid', hid=_OpenedHID(hid_device))
+            try:
+                cl = ledger_bitcoin.createClient(transport, chain=get_chain())
+            except (ledger_bitcoin.exception.errors.InsNotSupportedError,
+                    ledger_bitcoin.exception.errors.ClaNotSupportedError) as e:
+                # This can happen on very old versions.
+                # E.g. with a "nano s", with bitcoin app 1.1.10, SE 1.3.1, MCU 1.0,
+                #      - on machine one, ghost43 got InsNotSupportedError
+                #      - on machine two, thomasv got ClaNotSupportedError
+                #      unclear why the different exceptions, ledger_bitcoin version 0.2.1 in both cases
+                _logger.info(f"ledger_bitcoin.createClient() got exc: {e}. falling back to old plugin.")
+                cl = None
+            if isinstance(cl, ledger_bitcoin.client.NewClient):
+                _logger.debug(f"Ledger_Client.pairing_dialog(). creating NewClient for {self.device_descriptor=}.")
+                self.impl = Ledger_Client_New(self, transport)
+            else:
+                _logger.debug(f"Ledger_Client.pairing_dialog(). creating LegacyClient for {self.device_descriptor=}.")
+                self.impl = Ledger_Client_Legacy(self, hid_device)
+        except BaseException:
+            hid_device.close()
+            raise
+
+    def is_pairable(self) -> bool:
+        return True
+
+    def is_initialized(self) -> bool:
+        return True
+
+    @runs_in_hwd_thread
+    def close(self):
+        if self.impl is not None:
+            self.impl.close()
+            self.impl = None
+
+    def device_model_name(self) -> Optional[str]:
+        return LedgerPlugin.device_name_from_product_key(self.device_descriptor.product_key)
+
+    @runs_in_hwd_thread
+    def has_usable_connection_with_device(self) -> bool:
+        if not self.is_paired():
+            return True  # nothing to test before connecting, and testing must not connect
+        return self.impl.has_usable_connection_with_device()
+
+    @runs_in_hwd_thread
+    @test_pin_unlocked
+    def get_soft_device_id(self, *, avoid_pairing: bool = False) -> Optional[str]:
+        if not self.is_paired():
+            if avoid_pairing or self.get_handler() is None:
+                # Can't connect without the handler. This happens when listing the devices.
+                return None
+            self.pairing_dialog()
+        return self.impl.get_soft_device_id()
+
+    @runs_in_hwd_thread
+    @test_pin_unlocked
+    @with_paired_device
+    def get_xpub(self, bip32_path: str, xtype) -> str:
+        return self.impl.get_xpub(bip32_path, xtype)
+
+    @runs_in_hwd_thread
+    @test_pin_unlocked
+    @with_paired_device
+    def request_root_fingerprint_from_device(self) -> str:
+        return self.impl.request_root_fingerprint_from_device()
+
+    @runs_in_hwd_thread
+    @test_pin_unlocked
+    @with_paired_device
+    def get_master_fingerprint(self) -> bytes:
+        return self.impl.get_master_fingerprint()
+
+    @runs_in_hwd_thread
+    @with_paired_device(do_pair=False)
+    def show_address(self, address_path: str, txin_type: str):
+        return self.impl.show_address(address_path, txin_type)
+
+    @runs_in_hwd_thread
+    @with_paired_device(do_pair=False)
+    def sign_transaction(self, keystore: Hardware_KeyStore, tx: PartialTransaction, password: str):
+        return self.impl.sign_transaction(keystore, tx, password)
+
+    @runs_in_hwd_thread
+    @with_paired_device(do_pair=False)
+    def sign_message(
+            self,
+            address_path: str,
+            message: str,
+            password,
+            *,
+            script_type: Optional[str] = None,
+    ) -> bytes:
+        return self.impl.sign_message(address_path, message, password, script_type=script_type)
+
+
+class Ledger_ClientImpl(ABC):
+    """Talks to the Bitcoin app on the connected device of a Ledger_Client."""
     is_legacy: bool
 
-    @staticmethod
-    def construct_new(
-        *args, device_descriptor: 'Device', plugin: 'LedgerPlugin', **kwargs,
-    ) -> Union['Ledger_Client', HardwareClientDummy]:
-        """The 'real' constructor, that automatically decides which subclass to use."""
-        if LedgerPlugin.is_hw1(device_descriptor.product_key):
-            return HardwareClientDummy(
-                plugin=plugin,
-                device_descriptor=device_descriptor,
-                error_text="ledger hw.1 devices are no longer supported",
-            )
-        # for nano S or newer hw, decide which client impl to use based on software/firmware version:
-        hid_device = HID()
-        hid_device.path = device_descriptor.path
-        hid_device.open()
-        transport = ledger_bitcoin.TransportClient('hid', hid=hid_device)
-        try:
-            cl = ledger_bitcoin.createClient(transport, chain=get_chain())
-        except (ledger_bitcoin.exception.errors.InsNotSupportedError,
-                ledger_bitcoin.exception.errors.ClaNotSupportedError) as e:
-            # This can happen on very old versions.
-            # E.g. with a "nano s", with bitcoin app 1.1.10, SE 1.3.1, MCU 1.0,
-            #      - on machine one, ghost43 got InsNotSupportedError
-            #      - on machine two, thomasv got ClaNotSupportedError
-            #      unclear why the different exceptions, ledger_bitcoin version 0.2.1 in both cases
-            _logger.info(f"ledger_bitcoin.createClient() got exc: {e}. falling back to old plugin.")
-            cl = None
-        if isinstance(cl, ledger_bitcoin.client.NewClient):
-            _logger.debug(f"Ledger_Client.construct_new(). creating NewClient for {device_descriptor=}.")
-            return Ledger_Client_New(device_descriptor, hid_device, *args, plugin=plugin, **kwargs)
-        else:
-            _logger.debug(f"Ledger_Client.construct_new(). creating LegacyClient for {device_descriptor=}.")
-            return Ledger_Client_Legacy(device_descriptor, hid_device, *args, plugin=plugin, **kwargs)
+    def __init__(self, hw_client: Ledger_Client):
+        self.hw_client = hw_client
 
-    def __init__(self, *, plugin: HW_PluginBase, device_descriptor: 'Device'):
-        HardwareClientBase.__init__(self, plugin=plugin, device_descriptor=device_descriptor)
+    def get_handler(self) -> Optional['HardwareHandlerBase']:
+        return self.hw_client.get_handler()
+
+    @abstractmethod
+    def close(self):
+        pass
+
+    @abstractmethod
+    def has_usable_connection_with_device(self) -> bool:
+        pass
+
+    @abstractmethod
+    def get_soft_device_id(self) -> Optional[str]:
+        pass
+
+    @abstractmethod
+    def get_xpub(self, bip32_path: str, xtype) -> str:
+        pass
+
+    @abstractmethod
+    def request_root_fingerprint_from_device(self) -> str:
+        pass
 
     @abstractmethod
     def get_master_fingerprint(self) -> bytes:
@@ -372,24 +520,16 @@ class Ledger_Client(HardwareClientBase, ABC):
         pass
 
 
-class Ledger_Client_Legacy(Ledger_Client):
+class Ledger_Client_Legacy(Ledger_ClientImpl):
     """Client based on the bitchip library, targeting versions 2.0.* and below."""
     is_legacy = True
 
-    def __init__(self, device_descriptor: 'Device', hidDevice: 'HID', *, product_key: Tuple[int, int],
-                 plugin: HW_PluginBase):
-        Ledger_Client.__init__(self, plugin=plugin, device_descriptor=device_descriptor)
-
-        # Hack, we close the old object and instantiate a new one
-        hidDevice.close()
-        dev = hid.device()
-        dev.open_path(hidDevice.path)
-        dev.set_nonblocking(True)
-        self.dongleObject = btchip(HIDDongleHIDAPI(dev, True, False))
+    def __init__(self, hw_client: Ledger_Client, hid_device):
+        Ledger_ClientImpl.__init__(self, hw_client)
+        self.dongleObject = btchip(HIDDongleHIDAPI(hid_device, True, False))
 
         self.signing = False
 
-        self._product_key = product_key
         self._soft_device_id = None
 
     def _get_master_fingerprint(self) -> bytes:
@@ -417,9 +557,6 @@ class Ledger_Client_Legacy(Ledger_Client):
         nodeData = self.dongleObject.getWalletPublicKey(bip32_path)
         return hash_160(compress_public_key(nodeData['publicKey']))[0:4]
 
-    def is_pairable(self):
-        return True
-
     def set_and_unset_signing(func):
         """Function decorator to set and unset self.signing."""
         def wrapper(self, *args, **kwargs):
@@ -442,23 +579,11 @@ class Ledger_Client_Legacy(Ledger_Client):
     def close(self):
         self.dongleObject.dongle.close()
 
-    def is_initialized(self):
-        return True
-
     @runs_in_hwd_thread
     def get_soft_device_id(self):
         if self._soft_device_id is None:
-            # modern ledger can provide xpub without user interaction
-            # (hw1 would prompt for PIN)
-            if not self.is_hw1():
-                self._soft_device_id = self._get_master_fingerprint().hex()
+            self._soft_device_id = self._get_master_fingerprint().hex()
         return self._soft_device_id
-
-    def is_hw1(self) -> bool:
-        return LedgerPlugin.is_hw1(self._product_key)
-
-    def device_model_name(self):
-        return LedgerPlugin.device_name_from_product_key(self._product_key)
 
     @runs_in_hwd_thread
     def request_root_fingerprint_from_device(self) -> str:
@@ -817,19 +942,15 @@ class Ledger_Client_Legacy(Ledger_Client):
         return bytes([27 + 4 + (signature[0] & 0x01)]) + r_padded + s_padded
 
 
-class Ledger_Client_New(Ledger_Client):
+class Ledger_Client_New(Ledger_ClientImpl):
     """Client based on the ledger_bitcoin library, targeting versions 2.1.* and above."""
 
     is_legacy = False
 
-    def __init__(self, device_descriptor: 'Device', hidDevice: 'HID', *, product_key: Tuple[int, int],
-                 plugin: HW_PluginBase):
-        Ledger_Client.__init__(self, plugin=plugin, device_descriptor=device_descriptor)
-
-        transport = ledger_bitcoin.TransportClient('hid', hid=hidDevice)
+    def __init__(self, hw_client: Ledger_Client, transport: 'ledger_bitcoin.TransportClient'):
+        Ledger_ClientImpl.__init__(self, hw_client)
         self.client = ledger_bitcoin.client.NewClient(transport, get_chain())
 
-        self._product_key = product_key
         self._soft_device_id = None
 
         self.master_fingerprint = None
@@ -837,24 +958,15 @@ class Ledger_Client_New(Ledger_Client):
         self._known_xpubs: Dict[str, str] = {}  # path ==> xpub
         self._registered_policies: Dict[bytes, bytes] = {}  # wallet id => wallet hmac
 
-    def is_pairable(self):
-        return True
-
     @runs_in_hwd_thread
     def close(self):
         self.client.stop()
-
-    def is_initialized(self):
-        return True
 
     @runs_in_hwd_thread
     def get_soft_device_id(self):
         if self._soft_device_id is None:
             self._soft_device_id = self.request_root_fingerprint_from_device()
         return self._soft_device_id
-
-    def device_model_name(self):
-        return LedgerPlugin.device_name_from_product_key(self._product_key)
 
     @runs_in_hwd_thread
     def has_usable_connection_with_device(self):
@@ -1371,13 +1483,16 @@ class LedgerPlugin(HW_PluginBase):
         return device
 
     @runs_in_hwd_thread
-    def create_client(self, device_descriptor: 'Device', handler) -> Union[Ledger_Client, None, HardwareClientDummy]:
-        try:
-            return Ledger_Client.construct_new(
-                device_descriptor=device_descriptor, product_key=device_descriptor.product_key, plugin=self)
-        except Exception as e:
-            self.logger.info(f"cannot connect at {device_descriptor.path} {e}", exc_info=e)
-        return None
+    def create_client(self, device_descriptor: 'Device', handler) -> Union[Ledger_Client, HardwareClientDummy]:
+        if self.is_hw1(device_descriptor.product_key):
+            return HardwareClientDummy(
+                plugin=self,
+                device_descriptor=device_descriptor,
+                error_text="ledger hw.1 devices are no longer supported",
+            )
+        # Doesn't connect: the client opens the device through its handler when the
+        # device is first used, see Ledger_Client.pairing_dialog.
+        return Ledger_Client(plugin=self, device_descriptor=device_descriptor)
 
     @runs_in_hwd_thread
     def show_address(self, wallet, address, keystore=None):
