@@ -11,7 +11,7 @@ import struct
 from electrum import bip32
 from electrum.bip32 import BIP32Node, InvalidMasterKeyVersionBytes
 from electrum.i18n import _
-from electrum.plugin import Device, hook, runs_in_hwd_thread
+from electrum.plugin import Device, hook, runs_in_hwd_thread, DeviceTransport
 from electrum.keystore import Hardware_KeyStore, KeyStoreWithMPK
 from electrum.transaction import PartialTransaction
 from electrum.wallet import Standard_Wallet, Multisig_Wallet, Abstract_Wallet
@@ -604,12 +604,15 @@ class ColdcardPlugin(HW_PluginBase):
         fn = CKCC_SIMULATOR_PATH
 
         if os.path.exists(fn):
-            return [Device(path=fn,
-                           interface_number=-1,
-                           id_=fn,
-                           product_key=(COINKITE_VID, CKCC_SIMULATED_PID),
-                           usage_page=0,
-                           transport_ui_string='simulator')]
+            return [Device(
+                path=fn,
+                interface_number=-1,
+                id_=fn,
+                product_key=(COINKITE_VID, CKCC_SIMULATED_PID),
+                usage_page=0,
+                transport_ui_string='simulator',
+                transport=DeviceTransport.SOCKET)
+            ]
 
         return []
 
